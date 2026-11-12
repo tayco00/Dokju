@@ -1,0 +1,6 @@
+bin/
+/Dokju.exe
+*.tmp
+*.zip
+*.sha256
+

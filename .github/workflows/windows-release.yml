@@ -1,0 +1,97 @@
+name: Dokju Windows
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24.14.1'
+          architecture: x64
+      - name: Windows-Paket bauen
+        shell: pwsh
+        run: |
+          $nodePath = (Get-Command node.exe).Source
+          $license = Join-Path (Split-Path -Parent $nodePath) 'LICENSE'
+          if (!(Test-Path -LiteralPath $license)) { throw 'Die Lizenz aus der Node.js-Distribution fehlt.' }
+          ./Build.ps1 -Package -Repository $env:GITHUB_REPOSITORY -Commit $env:GITHUB_SHA -Sequence $env:GITHUB_RUN_NUMBER -NodePath $nodePath -NodeLicense $license
+      - name: Anwendungs- und Updatetests
+        shell: pwsh
+        run: ./Test.ps1 -Package
+      - name: Prüfsumme erstellen
+        shell: pwsh
+        run: (Get-FileHash -LiteralPath Dokju.zip -Algorithm SHA256).Hash | Set-Content -LiteralPath Dokju.sha256
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: dokju-windows
+          path: |
+            Dokju.zip
+            Dokju.sha256
+          compression-level: 0
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: windows-2025
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: dokju-windows
+      - name: GitHub-Release veröffentlichen
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $expected = (Get-Content -LiteralPath Dokju.sha256 -Raw).Trim()
+          if ((Get-FileHash -LiteralPath Dokju.zip -Algorithm SHA256).Hash -ne $expected) { throw 'Die Prüfsumme des Build-Artefakts stimmt nicht.' }
+          $tag = "dokju-$env:GITHUB_RUN_NUMBER-$env:GITHUB_SHA"
+          $previousNativeMode = $PSNativeCommandUseErrorActionPreference
+          $PSNativeCommandUseErrorActionPreference = $false
+          $release = gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft,assets 2>$null
+          $exists = $LASTEXITCODE -eq 0
+          $PSNativeCommandUseErrorActionPreference = $previousNativeMode
+          if (!$exists) {
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Dokju · Build $env:GITHUB_RUN_NUMBER" --notes "Commit $env:GITHUB_SHA" --draft
+            if ($LASTEXITCODE -ne 0) { throw 'Der Release-Entwurf konnte nicht erstellt werden.' }
+          } else {
+            $published = $release | ConvertFrom-Json
+            if (!$published.isDraft) {
+              if ($published.assets.name -notcontains 'Dokju.zip') { throw 'Im veröffentlichten Release fehlt Dokju.zip.' }
+              exit 0
+            }
+          }
+          gh release upload $tag Dokju.zip --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Das Windows-Paket konnte nicht hochgeladen werden.' }
+          $head = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha
+          if ($LASTEXITCODE -ne 0) { throw 'Der aktuelle Commit auf main konnte nicht ermittelt werden.' }
+          $latest = if ($head -eq $env:GITHUB_SHA) { '--latest' } else { '--latest=false' }
+          gh release edit $tag --repo $env:GITHUB_REPOSITORY --draft=false $latest
+          if ($LASTEXITCODE -ne 0) { throw 'Das Windows-Paket konnte nicht veröffentlicht werden.' }
+
+  verify-live:
+    needs: publish
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Öffentliches Update laden und starten
+        shell: pwsh
+        run: ./Test.ps1 -LiveRepository $env:GITHUB_REPOSITORY -LiveSequence $env:GITHUB_RUN_NUMBER
