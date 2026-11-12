@@ -9,10 +9,13 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { demo, Store } from '../backend/store.mjs';
+import { Store } from '../backend/store.mjs';
 
 const server = fileURLToPath(new URL('./service-harness.mjs', import.meta.url));
-const fixture = { ...demo, title: 'Beratung mit Özer <Test>', reference: 'AZ-Ä-42', count: 2 };
+const fixture = {
+  title: 'Beratung mit Özer <Test>', reference: 'AZ-Ä-42', count: 2, controller: 'Verwaltung',
+  provider: 'Protokolldienst', contact: 'datenschutz@example.invalid', audioDays: 2, proofDays: 90,
+};
 
 function temporary(t) {
   const directory = mkdtempSync(join(tmpdir(), 'dokju-test-'));
@@ -20,13 +23,13 @@ function temporary(t) {
   return directory;
 }
 
-async function launch(directory, key, bind = '127.0.0.1', port = '0') {
+async function launch(directory, key, bind = '127.0.0.1', port = '0', publicOrigin = '') {
   const socketPath = globalThis.process.platform === 'win32'
     ? '\\\\.\\pipe\\LOCAL\\dokju-test-' + randomUUID() : join(directory, 'test.sock');
   const process = spawn(globalThis.process.execPath, [server], {
     windowsHide: true,
     env: { ...globalThis.process.env, DOKJU_DATA: directory, DOKJU_KEY: key.toString('base64'),
-      DOKJU_TEST_SOCKET: socketPath, DOKJU_PORT: port, DOKJU_BIND: bind },
+      DOKJU_TEST_SOCKET: socketPath, DOKJU_PORT: port, DOKJU_BIND: bind, DOKJU_PUBLIC_ORIGIN: publicOrigin },
   });
   const output = createInterface({ input: process.stdout });
   const replies = output[Symbol.asyncIterator]();
@@ -68,6 +71,7 @@ async function openForm(app, url) {
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('referrer-policy'), 'strict-origin');
   const raw = await response.text();
+  assert.doesNotMatch(raw, /Bitte nur Testdaten verwenden|Use test data only|Das ist ein Test/);
   const cookie = response.headers.get('set-cookie').split(';')[0];
   const claim = /name="claim" value="([A-Za-z0-9_-]+)"/.exec(raw)[1];
   const lang = /name="lang" value="([a-z]+)"/.exec(raw)[1];
@@ -154,6 +158,29 @@ test('Desktop and citizen flow survives a restart, preserves exact notices and r
   assert.equal((await app.request('/verify', exported.proof)).value.valid, false);
   assert.ok(!readFileSync(join(directory, 'store.dokju')).includes(Buffer.from(fixture.title)));
   await app.stop();
+});
+
+test('Mobile portal links use the configured HTTPS origin and secure cookies', async t => {
+  const directory = temporary(t);
+  const key = randomBytes(32);
+  await assert.rejects(launch(directory, key, '192.168.0.20'), /bindet ausschließlich an 127\.0\.0\.1/);
+  await assert.rejects(launch(directory, key, '127.0.0.1', '0', 'http://einwilligung.example'), /HTTPS-Adresse/);
+  await assert.rejects(launch(directory, key, '127.0.0.1', '0', 'https://einwilligung.example/portal'), /ohne Pfad/);
+  await assert.rejects(launch(directory, key, '127.0.0.1', '0', `https://${'a'.repeat(62)}.example`), /höchstens 71 Zeichen/);
+  const app = await launch(directory, key, '127.0.0.1', '0', 'https://einwilligung.example/');
+  t.after(() => app.stop());
+  assert.equal(app.origin, 'https://einwilligung.example');
+  assert.deepEqual((await app.request('/cases')).value, { origin: app.origin, cases: [] });
+  const created = await app.request('/cases', { ...fixture, count: 1 });
+  const base = '/cases/' + created.value.id;
+  const { link } = (await app.request(base + '/invite?person=1')).value;
+  assert.ok(link.startsWith(app.origin + '/i/'));
+  assert.equal((await app.citizen(link, { headers: { Host: '127.0.0.1' } })).status, 421);
+  assert.match((await app.citizen(link)).headers.get('set-cookie'), /; Secure\b/);
+  const form = await openForm(app, link);
+  assert.equal((await submit(app, form, 'accepted', { Origin: app.origin })).status, 303);
+  const receipt = await (await app.citizen(form.url, { headers: { Cookie: form.cookie } })).text();
+  assert.match(receipt, /href="https:\/\/einwilligung\.example\/w\//);
 });
 
 test('Parallel decisions only commit once and a refusal blocks recording', async t => {

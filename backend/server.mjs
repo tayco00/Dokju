@@ -1,17 +1,20 @@
 import { createServer } from 'node:http';
-import { isIPv4 } from 'node:net';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
-import { Store, RuleError, demo } from './store.mjs';
+import { Store, RuleError } from './store.mjs';
 import { qr } from './qr.mjs';
 import { portal, escape, sendHtml } from './portal.mjs';
 import { proofPdf } from './pdf.mjs';
 
-function privateAddress(value) {
-  if (value === '127.0.0.1') return true;
-  if (!isIPv4(value)) return false;
-  const [a, b] = value.split('.').map(Number);
-  return a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
+const loopback = '127.0.0.1';
+
+function portalOrigin(value) {
+  if (!value) return null;
+  const url = URL.canParse(value) ? new URL(value) : null;
+  if (!url || url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' ||
+    url.href !== url.origin + '/' || url.origin.length > 71)
+    throw new Error('Für das mobile Portal ist eine HTTPS-Adresse ohne Pfad erforderlich. Die Adresse darf höchstens 71 Zeichen lang sein.');
+  return url.origin;
 }
 
 async function body(request, limit) {
@@ -52,12 +55,12 @@ function createHandler(route, failure) {
 export async function run(testSocket) {
   const key = Buffer.from(process.env.DOKJU_KEY ?? '', 'base64');
   const directory = process.env.DOKJU_DATA;
-  const bind = process.env.DOKJU_BIND ?? '127.0.0.1';
+  const publicOrigin = portalOrigin(process.env.DOKJU_PUBLIC_ORIGIN);
   const mobilePort = Number(process.env.DOKJU_PORT ?? '8787');
   if (key.length !== 32 || !directory)
     throw new Error('Die lokale Startkonfiguration fehlt.');
-  if (!privateAddress(bind) || !Number.isInteger(mobilePort) || mobilePort < 0 || mobilePort > 65535)
-    throw new Error('Die Demo benötigt eine lokale oder private IPv4-Adresse und einen gültigen Port.');
+  if ((process.env.DOKJU_BIND ?? loopback) !== loopback || !Number.isInteger(mobilePort) || mobilePort < 0 || mobilePort > 65535)
+    throw new Error('Der Portaldienst bindet ausschließlich an 127.0.0.1 und benötigt einen gültigen Port.');
   delete process.env.DOKJU_KEY;
   const store = new Store(directory, key);
   store.prune();
@@ -71,8 +74,8 @@ export async function run(testSocket) {
   const citizenFailure = (response, status, message) => sendHtml(response, status,
     `<!doctype html><html lang="de"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dokju</title><main><h1>Dokju</h1><p>${escape(message)}</p></main></html>`);
   const citizen = createHandler(serveCitizen, citizenFailure);
-  const actualPort = await start(citizen, mobilePort, bind);
-  origin = `http://${bind}:${actualPort}`;
+  const actualPort = await start(citizen, mobilePort, loopback);
+  origin = publicOrigin ?? `http://${loopback}:${actualPort}`;
   const mirror = testSocket ? createHandler(serveCitizen, citizenFailure) : null;
   if (mirror) await start(mirror, testSocket);
 
@@ -84,7 +87,7 @@ export async function run(testSocket) {
     if (method === 'POST' && (!data || typeof data !== 'object' || Array.isArray(data)))
       throw new RuleError('Ungültige Eingabe.');
     if (method === 'GET' && url.pathname === '/cases')
-      return send(200, { origin, defaults: demo, cases: store.data.cases.map(item => store.view(item)).reverse() });
+      return send(200, { origin, cases: store.data.cases.map(item => store.view(item)).reverse() });
     if (method === 'POST' && url.pathname === '/cases')
       return send(201, store.create(data));
     if (method === 'POST' && url.pathname === '/verify')

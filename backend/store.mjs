@@ -4,14 +4,6 @@ import { join } from 'node:path';
 import { notices } from './text.mjs';
 
 export const states = ['pending', 'accepted', 'declined', 'withdrawn', 'expired'];
-export const demo = {
-  controller: 'Jugend- und Sozialamt Musterstadt',
-  provider: 'SpeechMind (Demo, ohne Verbindung)',
-  contact: 'datenschutz@example.invalid',
-  audioDays: 2,
-  proofDays: 90,
-};
-
 export function equal(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   const left = Buffer.from(a);

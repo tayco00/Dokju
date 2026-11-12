@@ -89,7 +89,7 @@ export function proofPdf({ evidence, seal }, fontFile = join(process.env.WINDIR 
     page = [];
     y = 789;
     line('Dokju  /  Einwilligungsnachweis', 22, '0.07 0.35 0.29');
-    line(`DEMO  ·  Seite ${pages.length + 1}`, 11);
+    line(`Seite ${pages.length + 1}`, 11);
     y -= 12;
   }
   function block(text, size = 11) {

@@ -7,8 +7,6 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net;
-using System.Net.NetworkInformation;
-using System.Net.Sockets;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -101,7 +99,6 @@ namespace Dokju
                 Window = (Window)XamlReader.Load(layout);
             SetWindowIcon();
             Window.SizeChanged += (sender, args) => AdaptLayout(args.NewSize.Width);
-            Button("DemoButton").Click += (sender, args) => Run(() => CreateExample());
             Button("NewButton").Click += (sender, args) => Run(NewCase);
             Button("ConnectionButton").Click += (sender, args) => Run(Configure);
             Button("VerifyButton").Click += (sender, args) => Run(Verify);
@@ -121,15 +118,8 @@ namespace Dokju
             Control<ComboBox>("CaseFilter").SelectionChanged += (sender, args) => Run(Filter);
             Control<ListBox>("CaseList").SelectionChanged += (sender, args) => { if (!updating) Run(ShowCase); };
             Control<ComboBox>("PersonList").SelectionChanged += (sender, args) => { if (!updating) Run(ShowPerson); };
-            connection = smoke ? new Connection { port = 0 } : LoadConnection();
-            try { Start(connection); }
-            catch (IOException error)
-            {
-                if (connection.address == "127.0.0.1") throw;
-                connectionNotice = "Die gespeicherte WLAN-Adresse ist nicht verfügbar. " + error.Message;
-                connection = new Connection();
-                Start(connection);
-            }
+            connection = smoke ? new Connection { port = 0, publicOrigin = "https://einwilligung.example" } : LoadConnection();
+            Start(connection);
             Refresh(null, true);
             Message(connectionNotice ?? "Bereit.");
             timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
@@ -157,9 +147,13 @@ namespace Dokju
             Label("DetailTitle").FontSize = compact ? 22 : 26;
             Button("ExportButton").Content = compact ? "Exportieren" : "Nachweis exportieren";
             Button("OpenButton").Content = compact ? "Browser öffnen" : "Im Browser öffnen";
+            bool mobile = connection != null && connection.publicOrigin != null;
             int qrSize = compact ? 135 : 180;
-            Control<ColumnDefinition>("QrColumn").Width = new GridLength(qrSize);
-            Control<Image>("QrImage").Width = Control<Image>("QrImage").Height = qrSize;
+            var qr = Control<Image>("QrImage");
+            Control<ColumnDefinition>("QrColumn").Width = new GridLength(mobile ? qrSize : 0);
+            qr.Width = qr.Height = qrSize;
+            qr.Visibility = mobile ? Visibility.Visible : Visibility.Collapsed;
+            Control<StackPanel>("QrDetails").Margin = new Thickness(mobile ? 15 : 0, 0, 0, 0);
         }
 
         private void SetWindowIcon()
@@ -178,49 +172,58 @@ namespace Dokju
             try
             {
                 var saved = Installation.ReadJson<Connection>(path);
-                IPAddress address;
-                if (saved != null && saved.port >= 1024 && saved.port <= 65535 && IPAddress.TryParse(saved.address, out address) &&
-                    address.AddressFamily == AddressFamily.InterNetwork && address.ToString() == saved.address) return saved;
+                if (saved != null && saved.port >= 1024 && saved.port <= 65535)
+                {
+                    saved.publicOrigin = NormalizeOrigin(saved.publicOrigin);
+                    if (saved.address != "127.0.0.1")
+                        connectionNotice = "Dokju nutzt die lokale Verbindung. Für Mobilgeräte kann unter Verbindung eine HTTPS-Adresse hinterlegt werden.";
+                    saved.address = "127.0.0.1";
+                    return saved;
+                }
             }
             catch (IOException) { }
             catch (InvalidDataException) { }
             catch (ArgumentException) { }
             catch (InvalidOperationException) { }
-            connectionNotice = "Die gespeicherte Verbindung ist ungültig. Dokju nutzt die lokale Vorschau.";
+            connectionNotice = "Die gespeicherte Verbindung ist ungültig. Dokju nutzt die lokale Verbindung.";
             return new Connection();
         }
 
         private void Start(Connection options)
         {
-            backend = new Backend(directory, options.address, options.port);
-            Label("ConnectionText").Text = (options.address == "127.0.0.1" ? "Lokale Vorschau" : "WLAN-Demo") + "\n" + backend.Origin;
+            backend = new Backend(directory, options.port, options.publicOrigin);
+            Label("ConnectionText").Text = (options.publicOrigin == null ? "Nur auf diesem Gerät" : "Portaladresse") + "\n" + backend.Origin;
+        }
+
+        private static string NormalizeOrigin(string value)
+        {
+            if (String.IsNullOrWhiteSpace(value)) return null;
+            Uri uri;
+            if (!Uri.TryCreate(value.Trim(), UriKind.Absolute, out uri) || uri.Scheme != Uri.UriSchemeHttps ||
+                uri.UserInfo.Length != 0 || uri.AbsolutePath != "/" || uri.Query.Length != 0 || uri.Fragment.Length != 0)
+                throw new IOException("Bitte eine HTTPS-Adresse ohne Anmeldedaten, Pfad oder Abfrage eingeben.");
+            var canonical = new UriBuilder(uri) { Host = uri.IdnHost };
+            string origin = canonical.Uri.GetLeftPart(UriPartial.Authority);
+            if (origin.Length > 71) throw new IOException("Die HTTPS-Adresse darf für den QR-Code höchstens 71 Zeichen lang sein.");
+            return origin;
         }
 
         private void Configure()
         {
-            var addresses = new List<string> { "127.0.0.1" };
-            foreach (var network in NetworkInterface.GetAllNetworkInterfaces())
+            var dialog = new FormDialog(Window, "Verbindung", "Hier legen Sie fest, wie Teilnehmende das Einwilligungsportal erreichen.");
+            var portal = dialog.Field("HTTPS-Adresse für Mobilgeräte (optional)", connection.publicOrigin ?? "", 160);
+            var port = dialog.Field("Lokaler Port", connection.port.ToString(German), 5);
+            dialog.Note("Bei leerer Portaladresse lassen sich Einladungen auf diesem PC öffnen. Für Mobilgeräte leitet ein HTTPS-Reverse-Proxy auf diesem PC Anfragen an 127.0.0.1 und den lokalen Port weiter.");
+            dialog.Note("Verwenden Sie für bereits ausgegebene Links weiterhin dieselbe Portaladresse. Im lokalen Modus gilt das auch für den Port.");
+            Connection next = null;
+            dialog.Accept = () =>
             {
-                if (network.OperationalStatus != OperationalStatus.Up) continue;
-                foreach (var entry in network.GetIPProperties().UnicastAddresses)
-                {
-                    if (entry.Address.AddressFamily != AddressFamily.InterNetwork) continue;
-                    byte[] ip = entry.Address.GetAddressBytes();
-                    if (ip[0] == 10 || (ip[0] == 192 && ip[1] == 168) || (ip[0] == 172 && ip[1] >= 16 && ip[1] <= 31))
-                        addresses.Add(entry.Address.ToString());
-                }
-            }
-            var dialog = new FormDialog(Window, "Verbindung", "Lokale Vorschau für diesen PC oder WLAN-Demo für ein Smartphone im selben Netzwerk.");
-            var selector = dialog.Select("Adresse", addresses.Distinct().ToArray(), connection.address);
-            var port = dialog.Field("Port", connection.port.ToString(German), 5);
-            dialog.Note("127.0.0.1 ist nur an diesem PC erreichbar. WLAN-Demo verwendet HTTP. Speichern Sie eine feste Adresse und einen festen Port, damit bereits ausgegebene Links erreichbar bleiben.");
-            dialog.Note("Falls das Smartphone die Adresse nicht erreicht, prüfen Sie das gemeinsame WLAN und die eingehende Windows-Firewallregel für den gewählten Port.");
+                int number = Number(port);
+                if (number < 1024 || number > 65535) throw new IOException("Bitte einen Port zwischen 1024 und 65535 angeben.");
+                next = new Connection { port = number, publicOrigin = NormalizeOrigin(portal.Text) };
+            };
             if (!dialog.Show("Verbindung übernehmen")) return;
-            int number;
-            if (!Int32.TryParse(port.Text, out number) || number < 1024 || number > 65535)
-                throw new IOException("Bitte einen Port zwischen 1024 und 65535 angeben.");
-            var next = new Connection { address = (string)selector.SelectedItem, port = number };
-            if (next.address == connection.address && next.port == connection.port) return;
+            if (next.publicOrigin == connection.publicOrigin && next.port == connection.port) return;
             backend.Dispose();
             backend = null;
             try
@@ -236,22 +239,22 @@ namespace Dokju
             }
             connection = next;
             qrKey = null;
+            AdaptLayout(Window.ActualWidth);
             Refresh(null, true);
             Message("Verbindung aktualisiert.");
         }
 
         private void NewCase()
         {
-            var defaults = dashboard.defaults;
-            var dialog = new FormDialog(Window, "Neuer Vorgang", "Verwenden Sie ein Testaktenzeichen und fiktive Angaben.");
+            var dialog = new FormDialog(Window, "Neuer Vorgang", "Legen Sie die Angaben fest, die Teilnehmende vor ihrer Entscheidung sehen.");
             var title = dialog.Field("Gesprächsbezeichnung", "", 90);
             var reference = dialog.Field("Aktenzeichen", "", 64);
             var count = dialog.Field("Teilnehmende (1 bis 12)", "1", 2);
-            var controller = dialog.Field("Verantwortliche Stelle", defaults.controller, 100);
-            var provider = dialog.Field("KI-Anbieter", defaults.provider, 100);
-            var contact = dialog.Field("Datenschutzkontakt", defaults.contact, 110);
-            var audioDays = dialog.Field("Aufnahme und Transkript (Tage)", defaults.audioDays.ToString(), 3);
-            var proofDays = dialog.Field("Nachweis in Dokju (Tage)", defaults.proofDays.ToString(), 4);
+            var controller = dialog.Field("Verantwortliche Stelle", "", 100);
+            var provider = dialog.Field("KI-Anbieter", "", 100);
+            var contact = dialog.Field("Datenschutzkontakt", "", 110);
+            var audioDays = dialog.Field("Aufbewahrung von Aufnahme und Transkript (Tage)", "", 3);
+            var proofDays = dialog.Field("Aufbewahrung des Nachweises in Dokju (Tage)", "", 4);
             dialog.Note("Der QR-Link gilt 30 Minuten. Pro teilnehmender Person wird ein eigener Link erstellt.");
             string id = null;
             dialog.Accept = () =>
@@ -271,18 +274,6 @@ namespace Dokju
         {
             int value;
             return Int32.TryParse(field.Text, out value) ? value : 0;
-        }
-
-        private void CreateExample()
-        {
-            var defaults = dashboard.defaults;
-            var item = backend.Post<CaseRow>("/cases", new
-            {
-                title = "Beratungsgespräch Jugendamt", reference = "DEMO-" + DateTime.Now.ToString("yyMMdd-HHmmss"),
-                count = 1, controller = defaults.controller, provider = defaults.provider,
-                contact = defaults.contact, audioDays = defaults.audioDays, proofDays = defaults.proofDays
-            });
-            Reveal(item.id);
         }
 
         private void Reveal(string id)
@@ -394,8 +385,8 @@ namespace Dokju
                 Button("CopyButton").IsEnabled = true;
                 Button("OpenButton").IsEnabled = true;
             }
-            Label("QrHint").Text = connection.address == "127.0.0.1" ? "Am PC öffnen oder unter Verbindung die WLAN-Demo für das Smartphone wählen." :
-                "Zeigen Sie den Code der ausgewählten Person. Ihr Smartphone muss im selben WLAN sein.";
+            Label("QrHint").Text = connection.publicOrigin == null ? "Am PC öffnen. Für Mobilgeräte kann unter Verbindung eine HTTPS-Adresse hinterlegt werden." :
+                "Zeigen Sie den QR-Code der ausgewählten Person oder öffnen Sie den Link direkt.";
         }
 
         private void Renew()
@@ -514,13 +505,18 @@ namespace Dokju
             {
                 try
                 {
-                    CreateExample();
+                    var item = backend.Post<CaseRow>("/cases", new
+                    {
+                        title = "Beratungsgespräch", reference = "AZ-42", count = 1, controller = "Verwaltung",
+                        provider = "Protokolldienst", contact = "datenschutz@example.invalid", audioDays = 2, proofDays = 90
+                    });
+                    Reveal(item.id);
                     var filter = Control<ComboBox>("CaseFilter");
                     filter.SelectedIndex = 2;
                     if (Control<ListBox>("CaseList").Items.Count != 0) throw new IOException("Statusfilter ist fehlerhaft.");
                     filter.SelectedIndex = 0;
                     var search = Control<TextBox>("SearchBox");
-                    search.Text = "DEMO-";
+                    search.Text = "AZ-42";
                     if (Control<ListBox>("CaseList").Items.Count != 1) throw new IOException("Aktenzeichensuche ist fehlerhaft.");
                     search.Clear();
                     Window.UpdateLayout();
@@ -581,13 +577,14 @@ namespace Dokju
 
     public sealed class Connection
     {
+        // Retain the address field for older versions that read the same configuration.
         public string address { get; set; }
         public int port { get; set; }
+        public string publicOrigin { get; set; }
         public Connection() { address = "127.0.0.1"; port = 8787; }
     }
     public sealed class Dashboard
     {
-        public Profile defaults { get; set; }
         public CaseRow[] cases { get; set; }
     }
     public sealed class Profile

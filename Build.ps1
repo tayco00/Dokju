@@ -67,13 +67,9 @@ if ($Package) {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archivePath = Join-Path $project 'Dokju.zip'
     $temporary = Join-Path $project ('Dokju-' + [Guid]::NewGuid().ToString('N') + '.tmp')
-    $files = @('.gitignore', 'Build.ps1', 'Test.ps1', 'README.md', 'Dokju.exe', 'Start-Dokju.cmd', 'bin\Dokju.exe', 'bin\Dokju.Start.exe')
+    $files = @('README.md', 'Dokju.exe', 'Start-Dokju.cmd', 'bin\Dokju.exe', 'bin\Dokju.Start.exe')
     if ($Repository) { $files += 'bin\release.json' }
     if ($NodePath) { $files += @('bin\node.exe', 'bin\NODE-LICENSE.txt') }
-    foreach ($folder in @('backend', 'desktop', 'launcher', 'shared', 'tests', '.github\workflows')) {
-        $files += Get-ChildItem -LiteralPath (Join-Path $project $folder) -File |
-            ForEach-Object { Join-Path $folder $_.Name }
-    }
     $files += $backendSources | ForEach-Object { Join-Path 'bin\backend' $_.Name }
 
     try {

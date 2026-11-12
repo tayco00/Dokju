@@ -35,7 +35,7 @@ export function notices(info) {
 
 export const ui = {
   de: {
-    demo: 'Demo · Bitte nur Testdaten verwenden', controller: 'Verantwortliche Stelle', provider: 'KI-Anbieter', contact: 'Datenschutzkontakt',
+    controller: 'Verantwortliche Stelle', provider: 'KI-Anbieter', contact: 'Datenschutzkontakt',
     storage: 'Was wird gespeichert?', rights: 'Ihre Datenschutzrechte', proofDate: 'Löschdatum des Nachweises', decision: 'Ihre Entscheidung',
     yes: 'Ich stimme zu', no: 'Ich lehne ab', until: 'Link gültig bis', accepted: 'Ihre Zustimmung wurde erfasst.',
     declined: 'Sie haben abgelehnt.', declinedInfo: 'Das Gespräch kann ohne Aufnahme und KI-Transkription stattfinden.',
@@ -48,7 +48,7 @@ export const ui = {
     conflict: 'Für diese Einladung wurde bereits eine andere Entscheidung erfasst.', viewDecision: 'Erfasste Entscheidung ansehen',
   },
   einfach: {
-    demo: 'Das ist ein Test. Bitte keine echten Daten verwenden.', controller: 'Diese Stelle ist verantwortlich', provider: 'Diese Firma bietet die KI an', contact: 'Kontakt für Datenschutz',
+    controller: 'Diese Stelle ist verantwortlich', provider: 'Diese Firma bietet die KI an', contact: 'Kontakt für Datenschutz',
     storage: 'Wie lange speichern wir die Daten?', rights: 'Ihre Rechte', proofDate: 'An diesem Tag löschen wir die Entscheidung', decision: 'Sie entscheiden',
     yes: 'Ja, ich bin einverstanden', no: 'Nein, ich möchte das nicht', until: 'So lange geht der Link', accepted: 'Wir haben Ihr Ja gespeichert.',
     declined: 'Sie haben Nein gesagt.', declinedInfo: 'Das Gespräch geht ohne Aufnahme weiter.',
@@ -61,7 +61,7 @@ export const ui = {
     conflict: 'Sie haben schon anders entschieden.', viewDecision: 'Meine Entscheidung ansehen',
   },
   en: {
-    demo: 'Demo · Use test data only', controller: 'Data controller', provider: 'AI provider', contact: 'Privacy contact',
+    controller: 'Data controller', provider: 'AI provider', contact: 'Privacy contact',
     storage: 'What is kept?', rights: 'Your data protection rights', proofDate: 'Consent record deletion date', decision: 'Your decision',
     yes: 'I consent', no: 'I decline', until: 'Link expires at', accepted: 'Your consent was recorded.',
     declined: 'You declined.', declinedInfo: 'The conversation can continue without recording or AI transcription.',

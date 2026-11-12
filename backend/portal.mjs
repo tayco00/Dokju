@@ -9,7 +9,6 @@ header{display:flex;justify-content:space-between;align-items:center;gap:12px;fl
 .brand{font-size:27px;font-weight:750;letter-spacing:-.045em}.brand b{display:inline-grid;place-items:center;background:#bee9dc;color:#11574e;border-radius:9px;width:34px;height:34px;margin-right:9px;font-size:20px;vertical-align:2px}
 nav{display:flex;gap:5px;flex-wrap:wrap}nav a{color:#31475d;border:1px solid #c6d2dd;text-decoration:none;border-radius:8px;padding:5px 9px;font-size:13px}
 nav a[aria-current]{background:#def2ea;color:#07594d;font-weight:700;border-color:#80b7ad}article{background:white;border:1px solid #dbe2eb;border-radius:20px;padding:clamp(19px,5vw,38px);box-shadow:0 12px 36px #1523370c}
-.demo{color:#6e4811;background:#fff5dc;border:1px solid #f3dfaf;border-radius:7px;padding:6px 10px;display:inline-block;font-size:13px;font-weight:650}
 h1{margin:14px 0 10px;line-height:1.12;font-size:clamp(27px,7vw,39px);letter-spacing:-.035em}h2{font-size:18px;margin:23px 0 3px}p{margin:7px 0 13px}.context{color:#53667a;overflow-wrap:anywhere}
 dl{margin:18px 0;display:grid;grid-template-columns:minmax(105px,1fr) 1.35fr;gap:6px 12px;background:#edf4f6;padding:14px;border-radius:10px;font-size:14px}
 dt{font-weight:650;overflow-wrap:anywhere}dd{margin:0;overflow-wrap:anywhere}form{margin:20px 0 8px}.buttons{display:flex;flex-wrap:wrap;gap:10px}
@@ -26,13 +25,12 @@ export function escape(value) {
 }
 
 function page(language, title, content, links = true) {
-  const copy = ui[language];
   const navigation = languages.map(code =>
     `<a href="?lang=${code}" lang="${code === 'en' ? 'en' : 'de'}"${code === language ? ' aria-current="page"' : ''}>${{ de: 'Deutsch', einfach: 'Einfaches Deutsch', en: 'English' }[code]}</a>`
   ).join('');
   return `<!doctype html><html lang="${language === 'en' ? 'en' : 'de'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} | Dokju</title><style>${css}</style></head>
     <body><main><header><span class="brand"><b aria-hidden="true">✓</b>Dokju</span>${links ? `<nav aria-label="${language === 'en' ? 'Language' : 'Sprache'}">${navigation}</nav>` : ''}</header>
-    <article><span class="demo">${copy.demo}</span>${content}</article></main></body></html>`;
+    <article>${content}</article></main></body></html>`;
 }
 
 function formatTime(value, language) {

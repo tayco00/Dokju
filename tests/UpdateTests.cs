@@ -197,9 +197,16 @@ namespace Dokju
             {
                 Require(archive.GetEntry("Dokju/Start-Dokju.cmd") != null, "Ship the Windows launcher.");
                 Require(archive.GetEntry("Dokju/Dokju.exe") != null, "Ship the native Windows entry point.");
-                Require(archive.GetEntry("Dokju/.github/workflows/windows-release.yml") != null, "Ship the release workflow.");
+                Require(archive.GetEntry("Dokju/README.md") != null, "Ship the application guide.");
                 foreach (var entry in archive.Entries)
-                    Require(!entry.Name.EndsWith(".dpapi") && !entry.Name.EndsWith(".dokju") && entry.Name != "workspace.lock", "Exclude application data from release.");
+                {
+                    var path = entry.FullName;
+                    bool applicationFile = path == "Dokju/Dokju.exe" || path == "Dokju/Start-Dokju.cmd" || path == "Dokju/README.md" ||
+                        path == "Dokju/bin/Dokju.exe" || path == "Dokju/bin/Dokju.Start.exe" || path == "Dokju/bin/release.json" ||
+                        path == "Dokju/bin/node.exe" || path == "Dokju/bin/NODE-LICENSE.txt" ||
+                        System.Text.RegularExpressions.Regex.IsMatch(path, @"\ADokju/bin/backend/[a-z][a-z0-9.-]*\.mjs\z");
+                    Require(applicationFile, "Exclude development and user data from release.");
+                }
             }
             if (build.sequence == 0) return;
             var offer = new UpdateOffer { Commit = build.commit, Repository = build.repository, Tag = build.tag, Sequence = build.sequence, Hash = Hash(zip) };

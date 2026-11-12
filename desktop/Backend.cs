@@ -15,7 +15,7 @@ namespace Dokju
         public readonly string Origin;
         public static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 8000000 };
 
-        public Backend(string directory, string address, int port)
+        public Backend(string directory, int port, string publicOrigin)
         {
             Directory.CreateDirectory(directory);
             var program = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "backend", "server.mjs");
@@ -28,8 +28,9 @@ namespace Dokju
                 StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
             };
             start.EnvironmentVariables["DOKJU_DATA"] = directory;
-            start.EnvironmentVariables["DOKJU_BIND"] = address;
+            start.EnvironmentVariables["DOKJU_BIND"] = "127.0.0.1";
             start.EnvironmentVariables["DOKJU_PORT"] = port.ToString();
+            start.EnvironmentVariables["DOKJU_PUBLIC_ORIGIN"] = publicOrigin ?? "";
             start.EnvironmentVariables["DOKJU_KEY"] = Convert.ToBase64String(Key(directory));
             try { process = Process.Start(start); }
             catch (System.ComponentModel.Win32Exception)
