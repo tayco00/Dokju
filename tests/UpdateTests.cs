@@ -31,6 +31,7 @@ namespace Dokju
                 SelectNewest();
                 PackageIntegrity(root);
                 DownloadAndStage(root);
+                CheckFallback();
                 ActivationAndRollback(root);
                 if (args.Length == 3) PackagedBuild(args[1], args[2], root);
                 Console.WriteLine("Updater: Auswahl, Integritaet, Aktivierung und Wiederanlauf bestanden.");
@@ -51,6 +52,9 @@ namespace Dokju
                 offer = updates.Check(repository, minimum - 1, null, CancellationToken.None).GetAwaiter().GetResult();
             }
             Require(offer != null, "No matching published GitHub release was found.");
+            var manifest = updates.CheckPublishedManifest(repository, minimum - 1, null, CancellationToken.None).GetAwaiter().GetResult();
+            Require(manifest != null && manifest.Tag == offer.Tag && manifest.Size == offer.Size && manifest.Hash == offer.Hash,
+                "The alternate release manifest must match the public GitHub release asset.");
             updates.Stage(root, offer, null, CancellationToken.None).GetAwaiter().GetResult();
             return Path.Combine(Installation.VersionPath(root, offer.Tag), Installation.Desktop);
         }
@@ -85,11 +89,38 @@ namespace Dokju
             }
         }
 
+        private static void CheckFallback()
+        {
+            var release = Release(8);
+            using (var fixture = new ReleaseFixture(Json.Serialize(new[] { release }), null))
+            using (var http = new HttpClient(fixture))
+            {
+                fixture.ApiLimited = true;
+                fixture.ManifestTag = release.tag_name;
+                fixture.Manifest = Json.Serialize(release);
+                var updates = new GitHubUpdates(http);
+                var offer = updates.Check(Repo, 7, null, CancellationToken.None).GetAwaiter().GetResult();
+                Require(offer != null && offer.Tag == release.tag_name, "Use the public manifest when the API is limited.");
+                Require(updates.Check(Repo, 8, null, CancellationToken.None).GetAwaiter().GetResult() == null, "The manifest must not offer an installed version.");
+                Require(updates.Check(Repo, 7, release.tag_name, CancellationToken.None).GetAwaiter().GetResult() == null, "The manifest must not offer a rejected version.");
+                fixture.Manifest = Json.Serialize(Release(9));
+                try
+                {
+                    updates.Check(Repo, 7, null, CancellationToken.None).GetAwaiter().GetResult();
+                    throw new Exception("The manifest must match the tag in the release URL.");
+                }
+                catch (IOException error) { Require(error.Message.Contains("begrenzt"), "Report the primary API failure when the fallback is invalid."); }
+            }
+        }
+
         private sealed class ReleaseFixture : HttpMessageHandler
         {
             private readonly string feed;
             private readonly byte[] package;
             internal bool UntrustedRedirect;
+            internal bool ApiLimited;
+            internal string ManifestTag;
+            internal string Manifest;
 
             internal ReleaseFixture(string feed, byte[] package) { this.feed = feed; this.package = package; }
 
@@ -97,15 +128,29 @@ namespace Dokju
             {
                 cancellation.ThrowIfCancellationRequested();
                 var host = request.RequestUri.Host;
-                if (host == "api.github.com") return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(feed) });
+                if (host == "api.github.com")
+                {
+                    if (!ApiLimited) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(feed) });
+                    var limited = new HttpResponseMessage(HttpStatusCode.Forbidden);
+                    limited.Headers.Add("X-RateLimit-Remaining", "0");
+                    return Task.FromResult(limited);
+                }
                 if (host == "github.com")
                 {
                     var redirect = new HttpResponseMessage(HttpStatusCode.Found);
-                    redirect.Headers.Location = new Uri(UntrustedRedirect ? "https://foreign.test/release" : "https://release-assets.githubusercontent.com/release");
+                    if (request.RequestUri.AbsolutePath.EndsWith("/latest/download/Dokju-update.json", StringComparison.Ordinal))
+                        redirect.Headers.Location = new Uri("https://github.com/" + Repo + "/releases/download/" + ManifestTag + "/Dokju-update.json");
+                    else if (request.RequestUri.AbsolutePath.EndsWith("/Dokju-update.json", StringComparison.Ordinal))
+                        redirect.Headers.Location = new Uri("https://release-assets.githubusercontent.com/manifest");
+                    else redirect.Headers.Location = new Uri(UntrustedRedirect ? "https://foreign.test/release" : "https://release-assets.githubusercontent.com/release");
                     return Task.FromResult(redirect);
                 }
                 if (host == "release-assets.githubusercontent.com")
+                {
+                    if (request.RequestUri.AbsolutePath == "/manifest")
+                        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Manifest) });
                     return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(package) });
+                }
                 throw new Exception("Untrusted redirect reached the HTTP client.");
             }
         }

@@ -89,11 +89,23 @@ jobs:
           } else {
             $published = $release | ConvertFrom-Json
             if (!$published.isDraft) {
-              if ($published.assets.name -notcontains 'Dokju.zip' -or $published.assets.name -notcontains 'Dokju-Setup.exe') { throw 'Im veröffentlichten Release fehlt ein Windows-Paket.' }
+              if ($published.assets.name -notcontains 'Dokju.zip' -or $published.assets.name -notcontains 'Dokju-Setup.exe' -or
+                  $published.assets.name -notcontains 'Dokju-update.json') { throw 'Im veröffentlichten Release fehlen Dateien.' }
               exit 0
             }
           }
-          gh release upload $tag Dokju-Setup.exe Dokju.zip --repo $env:GITHUB_REPOSITORY --clobber
+          $manifest = @{
+            tag_name = $tag
+            assets = @(@{
+              name = 'Dokju.zip'
+              state = 'uploaded'
+              size = (Get-Item -LiteralPath Dokju.zip).Length
+              digest = 'sha256:' + $expected['Dokju.zip'].ToLowerInvariant()
+              browser_download_url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/Dokju.zip"
+            })
+          }
+          $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath Dokju-update.json -Encoding utf8NoBOM
+          gh release upload $tag Dokju-Setup.exe Dokju.zip Dokju-update.json --repo $env:GITHUB_REPOSITORY --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Die Windows-Pakete konnten nicht hochgeladen werden.' }
           $head = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha
           if ($LASTEXITCODE -ne 0) { throw 'Der aktuelle Commit auf main konnte nicht ermittelt werden.' }

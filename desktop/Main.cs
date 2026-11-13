@@ -26,7 +26,8 @@ namespace Dokju
         private static int Main(string[] arguments)
         {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.SystemDefault;
-            bool smoke = arguments.Length == 2 && arguments[0] == "--smoke";
+            bool liveSmoke = arguments.Length == 2 && arguments[0] == "--smoke-live";
+            bool smoke = liveSmoke || (arguments.Length == 2 && arguments[0] == "--smoke");
             Guid probeId;
             bool probe = arguments.Length == 2 && arguments[0] == "--startup-probe" && Guid.TryParseExact(arguments[1], "N", out probeId);
             string directory = smoke ? Path.GetFullPath(arguments[1]) : Installation.DataDirectory;
@@ -48,9 +49,9 @@ namespace Dokju
                     using (guard)
                     {
                         var app = new Application();
-                        using (var workspace = new Workspace(directory, smoke))
+                        using (var workspace = new Workspace(directory, smoke, liveSmoke))
                         {
-                            if (smoke) workspace.Smoke();
+                            if (smoke) workspace.Smoke(liveSmoke);
                             if (probe) workspace.Window.ContentRendered += (sender, args) =>
                                 Installation.WriteAtomic(Path.Combine(Installation.Root(directory), "probes", arguments[1]), new byte[] { 1 });
                             if (arguments.Length == 1 && arguments[0] == "--update-fallback") workspace.ShowUpdateFallback();
@@ -93,7 +94,7 @@ namespace Dokju
         private string connectionNotice;
         public readonly Window Window;
 
-        public Workspace(string directory, bool smoke = false)
+        public Workspace(string directory, bool smoke, bool liveSmoke)
         {
             this.directory = directory;
             Directory.CreateDirectory(directory);
@@ -145,7 +146,7 @@ namespace Dokju
             timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
             timer.Tick += (sender, args) => PollStatus();
             timer.Start();
-            updates = new UpdatePanel(Window, Button("UpdateButton"), directory, smoke ? new GitHubUpdates(new System.Net.Http.HttpClient(new StartupUpdateFixture())) : null);
+            updates = new UpdatePanel(Window, Button("UpdateButton"), directory, smoke && !liveSmoke ? new GitHubUpdates(new System.Net.Http.HttpClient(new StartupUpdateFixture())) : null);
         }
 
         private void PollStatus()
@@ -648,7 +649,7 @@ namespace Dokju
             }
         }
 
-        public void Smoke()
+        public void Smoke(bool liveUpdate)
         {
             Window.ContentRendered += (sender, args) => Window.Dispatcher.BeginInvoke(new Action(async () =>
             {
@@ -657,7 +658,8 @@ namespace Dokju
                     var check = updates.StartupCheck;
                     if (check == null) throw new IOException("Die Updateprüfung wurde beim Öffnen nicht ausgelöst.");
                     await check;
-                    if (!Equals(Button("UpdateButton").Content, "Update verfügbar")) throw new IOException("Das Update wurde beim Öffnen nicht angezeigt.");
+                    if (!updates.LastCheckSucceeded) throw new IOException(updates.CheckMessage);
+                    if (!liveUpdate && !Equals(Button("UpdateButton").Content, "Update verfügbar")) throw new IOException("Das Update wurde beim Öffnen nicht angezeigt.");
                     var item = backend.Post<CaseRow>("/cases", new
                     {
                         title = "Beratungsgespräch", reference = "AZ-42", count = 1, controller = "Verwaltung",

@@ -2,12 +2,14 @@ using System;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Threading;
 
@@ -71,6 +73,7 @@ namespace Dokju
         private async Task CheckRepository(string source)
         {
             checking = true;
+            LastCheckSucceeded = false;
             checkMessage = "Dokju sucht nach Updates …";
             entry.Content = "Prüfe Updates …";
             NotifyState();
@@ -80,6 +83,7 @@ namespace Dokju
                 var baseline = Math.Max(build.sequence, Installation.ActiveSequence(root, state, source));
                 offer = await client.Check(source, baseline, state.rejected, lifetime.Token);
                 checkMessage = offer == null ? "Dokju ist auf dem neuesten verfügbaren Stand." : "Verfügbar · " + offer.Caption;
+                LastCheckSucceeded = true;
             }
             catch (Exception error)
             {
@@ -100,6 +104,8 @@ namespace Dokju
         private void NotifyState() { if (StateChanged != null) StateChanged(); }
 
         internal Task StartupCheck { get { return checkTask; } }
+        internal bool LastCheckSucceeded { get; private set; }
+        internal string CheckMessage { get { return checkMessage; } }
 
         internal void Show(Action<Window> snapshot = null)
         {
@@ -145,6 +151,15 @@ namespace Dokju
             install.Style = (Style)owner.Resources["Primary"];
             actions.Children.Add(check);
             actions.Children.Add(install);
+            var openRelease = new Hyperlink(new Run("Downloadseite öffnen"));
+            var download = new TextBlock { Margin = new Thickness(0, 14, 0, 0) };
+            download.Inlines.Add(openRelease);
+            layout.Children.Add(download);
+            openRelease.Click += (sender, args) =>
+            {
+                try { Process.Start(new ProcessStartInfo("https://github.com/" + repository + "/releases/latest") { UseShellExecute = true }); }
+                catch (System.ComponentModel.Win32Exception) { status.Text = "Der Standardbrowser konnte nicht geöffnet werden."; }
+            };
             Action showState = () =>
             {
                 if (installing) return;
@@ -252,8 +267,17 @@ namespace Dokju
 
         private static string ErrorText(Exception error)
         {
-            return error is OperationCanceledException ? "GitHub hat nicht rechtzeitig geantwortet." :
-                error is System.Net.Http.HttpRequestException ? "GitHub ist gerade nicht erreichbar. Bitte Verbindung prüfen und erneut versuchen." : error.Message;
+            if (error is OperationCanceledException) return "Die Verbindung zu GitHub hat zu lange gedauert. Versuchen Sie es erneut oder öffnen Sie die Downloadseite.";
+            if (!(error is System.Net.Http.HttpRequestException)) return error.Message;
+            var cause = error.InnerException as WebException;
+            if (cause != null)
+            {
+                if (cause.Status == WebExceptionStatus.NameResolutionFailure || cause.Status == WebExceptionStatus.ProxyNameResolutionFailure)
+                    return "Windows konnte die GitHub- oder Proxy-Adresse nicht auflösen. Öffnen Sie die Downloadseite im Browser.";
+                if (cause.Status == WebExceptionStatus.TrustFailure || cause.Status == WebExceptionStatus.SecureChannelFailure)
+                    return "Windows konnte die sichere Verbindung zu GitHub nicht herstellen. Öffnen Sie die Downloadseite im Browser.";
+            }
+            return "Dokju konnte GitHub über diese Verbindung nicht erreichen. Öffnen Sie die Downloadseite im Browser.";
         }
 
         public void Dispose()

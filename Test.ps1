@@ -42,8 +42,9 @@ try {
 
     $desktopData = Join-Path $scratch 'desktop'
     [void](New-Item -ItemType Directory -Path $desktopData)
-    $application = Start-Process -FilePath $desktop -ArgumentList ('--smoke "' + $desktopData + '"') -WindowStyle Hidden -PassThru
-    if (!$application.WaitForExit(25000)) {
+    $argument = if ($LiveRepository) { '--smoke-live' } else { '--smoke' }
+    $application = Start-Process -FilePath $desktop -ArgumentList ($argument + ' "' + $desktopData + '"') -WindowStyle Hidden -PassThru
+    if (!$application.WaitForExit(35000)) {
         Stop-Process -Id $application.Id
         throw 'Die Desktopoberfläche wurde nicht rechtzeitig geprüft.'
     }
@@ -52,7 +53,7 @@ try {
     if ($application.ExitCode -ne 0 -or !(Test-Path -LiteralPath (Join-Path $desktopData 'smoke-ok.txt'))) {
         throw 'Die Desktop-Abnahme ist fehlgeschlagen.'
     }
-    Write-Output 'Desktop: QR-Code, Softwareupdates-Dialog und Nachweisexport bestanden.'
+    Write-Output 'Desktop: Updateprüfung beim Start, QR-Code, Softwareupdates-Dialog und Nachweisexport bestanden.'
 } finally {
     if ($KeepSmoke) { Write-Output $scratch }
     else {

@@ -29,7 +29,11 @@ namespace Dokju
     internal sealed class GitHubUpdates
     {
         private const int Limit = 150 * 1024 * 1024;
-        private static readonly HttpClient DefaultHttp = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
+        private const string Manifest = "Dokju-update.json";
+        private static readonly HttpClient DefaultHttp = new HttpClient(new HttpClientHandler
+        {
+            AllowAutoRedirect = false, UseCookies = false, AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+        })
         {
             Timeout = Timeout.InfiniteTimeSpan
         };
@@ -41,29 +45,84 @@ namespace Dokju
         internal async Task<UpdateOffer> Check(string repository, long sequence, string rejected, CancellationToken cancellation)
         {
             if (!Installation.RepositoryIsValid(repository)) throw new InvalidDataException("Bitte ein GitHub-Repository in der Form Konto/Repository angeben.");
+            Exception failure;
             using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation))
             {
-                timeout.CancelAfter(TimeSpan.FromSeconds(15));
+                timeout.CancelAfter(TimeSpan.FromSeconds(8));
                 var url = new Uri("https://api.github.com/repos/" + repository + "/releases?per_page=30");
-                using (var response = await Send(url, true, timeout.Token).ConfigureAwait(false))
+                try
                 {
-                    if (response.StatusCode == HttpStatusCode.NotFound)
-                        throw new IOException("Das Repository ist nicht öffentlich erreichbar oder existiert noch nicht.");
-                    response.EnsureSuccessStatusCode();
-                    using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
-                    using (var buffer = new MemoryStream())
+                    using (var response = await Send(url, true, timeout.Token).ConfigureAwait(false))
                     {
-                        await Copy(stream, buffer, 4000000, null, timeout.Token).ConfigureAwait(false);
-                        return Select(System.Text.Encoding.UTF8.GetString(buffer.ToArray()), repository, sequence, rejected);
+                        RequireSuccess(response);
+                        var json = await ReadText(response, 4000000, timeout.Token).ConfigureAwait(false);
+                        try { return Select(json, repository, sequence, rejected); }
+                        catch (ArgumentException error) { throw new IOException("GitHub hat ungültige Release-Daten geliefert.", error); }
+                        catch (InvalidOperationException error) { throw new IOException("GitHub hat ungültige Release-Daten geliefert.", error); }
                     }
                 }
+                catch (OperationCanceledException error) { cancellation.ThrowIfCancellationRequested(); failure = error; }
+                catch (HttpRequestException error) { failure = error; }
+                catch (IOException error) { failure = error; }
+            }
+            try { return await CheckPublishedManifest(repository, sequence, rejected, cancellation).ConfigureAwait(false); }
+            catch (OperationCanceledException) { cancellation.ThrowIfCancellationRequested(); }
+            catch (HttpRequestException) { }
+            catch (IOException) { }
+            throw failure;
+        }
+
+        internal async Task<UpdateOffer> CheckPublishedManifest(string repository, long sequence, string rejected, CancellationToken cancellation)
+        {
+            if (!Installation.RepositoryIsValid(repository)) throw new InvalidDataException("Ungültiges Update-Repository.");
+            var url = new Uri("https://github.com/" + repository + "/releases/latest/download/" + Manifest);
+            var assetPath = @"\A/" + Regex.Escape(repository) + @"/releases/download/(dokju-[1-9][0-9]{0,17}-[a-f0-9]{40})/" + Regex.Escape(Manifest) + @"\z";
+            string tag = null;
+            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation))
+            {
+                timeout.CancelAfter(TimeSpan.FromSeconds(7));
+                for (int redirects = 0; redirects < 4; redirects++)
+                {
+                    using (var response = await Send(url, false, timeout.Token).ConfigureAwait(false))
+                    {
+                        if ((int)response.StatusCode >= 300 && (int)response.StatusCode < 400)
+                        {
+                            url = response.Headers.Location;
+                            if (!IsHttps(url)) throw new IOException("Ungültige Weiterleitung für die Updateinformationen.");
+                            if (url.Host == "github.com")
+                            {
+                                var match = Regex.Match(url.AbsolutePath, assetPath, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                                if (!match.Success || (tag != null && tag != match.Groups[1].Value))
+                                    throw new IOException("Die Weiterleitung führt zu einer anderen Veröffentlichung.");
+                                tag = match.Groups[1].Value;
+                            }
+                            else if (!IsAssetHost(url)) throw new IOException("Unbekannte Adresse für die Updateinformationen.");
+                            continue;
+                        }
+                        RequireSuccess(response);
+                        var json = await ReadText(response, 16000, timeout.Token).ConfigureAwait(false);
+                        Release release;
+                        try { release = new JavaScriptSerializer { MaxJsonLength = 16000 }.Deserialize<Release>(json); }
+                        catch (ArgumentException error) { throw new IOException("Ungültige Updateinformationen.", error); }
+                        catch (InvalidOperationException error) { throw new IOException("Ungültige Updateinformationen.", error); }
+                        if (release == null || !Installation.IsTag(release.tag_name) || (tag != null && release.tag_name != tag) ||
+                            Select(new[] { release }, repository, 0, null) == null)
+                            throw new IOException("Die Updateinformationen stimmen nicht mit der Veröffentlichung überein.");
+                        return Select(new[] { release }, repository, sequence, rejected);
+                    }
+                }
+                throw new IOException("GitHub hat die Updateabfrage zu oft umgeleitet.");
             }
         }
 
         internal static UpdateOffer Select(string json, string repository, long installed, string rejected)
         {
             var serializer = new JavaScriptSerializer { MaxJsonLength = 4000000 };
-            var releases = serializer.Deserialize<Release[]>(json) ?? new Release[0];
+            return Select(serializer.Deserialize<Release[]>(json) ?? new Release[0], repository, installed, rejected);
+        }
+
+        private static UpdateOffer Select(Release[] releases, string repository, long installed, string rejected)
+        {
             UpdateOffer selected = null;
             foreach (var release in releases)
             {
@@ -129,12 +188,11 @@ namespace Dokju
                     if ((int)response.StatusCode >= 300 && (int)response.StatusCode < 400)
                     {
                         url = response.Headers.Location;
-                        if (url == null || !url.IsAbsoluteUri || url.Scheme != "https" || !url.IsDefaultPort || url.UserInfo.Length != 0 ||
-                            (url.Host != "release-assets.githubusercontent.com" && url.Host != "objects.githubusercontent.com"))
+                        if (!IsHttps(url) || !IsAssetHost(url))
                             throw new IOException("GitHub hat das Update an eine unerwartete Adresse umgeleitet.");
                         continue;
                     }
-                    response.EnsureSuccessStatusCode();
+                    RequireSuccess(response);
                     using (var source = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                     using (var target = new FileStream(file, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true))
                     {
@@ -146,6 +204,39 @@ namespace Dokju
                 }
             }
             throw new IOException("GitHub hat den Download zu oft umgeleitet.");
+        }
+
+        private static bool IsHttps(Uri url)
+        {
+            return url != null && url.IsAbsoluteUri && url.Scheme == Uri.UriSchemeHttps && url.IsDefaultPort && url.UserInfo.Length == 0;
+        }
+
+        private static bool IsAssetHost(Uri url)
+        {
+            return url.Host == "release-assets.githubusercontent.com" || url.Host == "objects.githubusercontent.com";
+        }
+
+        private static void RequireSuccess(HttpResponseMessage response)
+        {
+            if (response.IsSuccessStatusCode) return;
+            var code = (int)response.StatusCode;
+            IEnumerable<string> remaining;
+            if (code == 429 || (code == 403 && (response.Headers.RetryAfter != null ||
+                (response.Headers.TryGetValues("X-RateLimit-Remaining", out remaining) && remaining.Contains("0")))))
+                throw new IOException("GitHub begrenzt gerade die Anfragen. Versuchen Sie es später erneut oder öffnen Sie die Downloadseite.");
+            if (code == 407) throw new IOException("Der Netzwerkproxy verlangt eine Anmeldung. Öffnen Sie die Downloadseite im Browser.");
+            if (code == 404) throw new IOException("GitHub findet das Repository oder die Veröffentlichung nicht (HTTP 404).");
+            throw new IOException("GitHub antwortet mit HTTP " + code + ". Öffnen Sie bei Bedarf die Downloadseite.");
+        }
+
+        private static async Task<string> ReadText(HttpResponseMessage response, int maximum, CancellationToken cancellation)
+        {
+            using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+            using (var buffer = new MemoryStream())
+            {
+                await Copy(stream, buffer, maximum, null, cancellation).ConfigureAwait(false);
+                return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
+            }
         }
 
         private async Task<HttpResponseMessage> Send(Uri url, bool api, CancellationToken cancellation)
