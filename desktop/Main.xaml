@@ -192,7 +192,13 @@
                   <StackPanel ToolTip="{Binding title}">
                     <TextBlock Text="{Binding title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
                     <TextBlock Text="{Binding reference}" FontSize="12" Foreground="#53667A" TextTrimming="CharacterEllipsis" Margin="0,4,0,0"/>
-                    <TextBlock Text="{Binding StateLabel}" FontSize="11" FontWeight="SemiBold" Foreground="#08665D" Margin="0,4,0,0"/>
+                    <TextBlock Text="{Binding StateLabel}" FontSize="11" FontWeight="SemiBold" Foreground="#08665D" Margin="0,4,0,0">
+                      <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers>
+                        <DataTrigger Binding="{Binding IsEnabled, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="False">
+                          <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                      </Style.Triggers></Style></TextBlock.Style>
+                    </TextBlock>
                   </StackPanel>
                 </DataTemplate>
               </ListBox.ItemTemplate>

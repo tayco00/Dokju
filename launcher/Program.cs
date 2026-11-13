@@ -66,7 +66,8 @@ namespace Dokju
             }
             catch (Exception error)
             {
-                MessageBox.Show(error.Message, "Dokju starten", MessageBoxButton.OK, MessageBoxImage.Warning);
+                if (args.Length == 0 || args[0] != "--activate")
+                    MessageBox.Show(error.Message, "Dokju starten", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return 1;
             }
         }

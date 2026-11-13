@@ -88,6 +88,8 @@ namespace Dokju
         private string qrLink;
         private string qrKey;
         private bool updating;
+        private bool disconnected;
+        private DateTime nextReconnect;
         private string connectionNotice;
         public readonly Window Window;
 
@@ -127,17 +129,38 @@ namespace Dokju
             Control<ListBox>("CaseList").SelectionChanged += (sender, args) => { if (!updating) Run(ShowCase); };
             Control<ComboBox>("PersonList").SelectionChanged += (sender, args) => { if (!updating) Run(ShowPerson); };
             connection = smoke ? new Connection { port = 0, publicOrigin = "https://einwilligung.example" } : LoadConnection();
-            Start(connection);
+            try { Start(connection); }
+            catch (BackendStartException error)
+            {
+                if (connection.publicOrigin != null || error.Code != "EADDRINUSE") throw;
+                connection = new Connection { port = 0 };
+                Start(connection);
+                connectionNotice = "Der bisherige Port ist belegt. Dokju verwendet " + connection.port + ". Bereits geteilte lokale Links bitte neu öffnen.";
+                try { SaveConnection(connection); }
+                catch (IOException) { connectionNotice += " Die Änderung konnte nicht gespeichert werden."; }
+                catch (UnauthorizedAccessException) { connectionNotice += " Die Änderung konnte nicht gespeichert werden."; }
+            }
             Refresh(null, true);
             Message(connectionNotice ?? "Bereit.");
             timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-            timer.Tick += (sender, args) =>
-            {
-                try { Refresh(null, false); }
-                catch (Exception error) { Message(error.Message); }
-            };
+            timer.Tick += (sender, args) => PollStatus();
             timer.Start();
-            updates = new UpdatePanel(Window, Button("UpdateButton"), directory);
+            updates = new UpdatePanel(Window, Button("UpdateButton"), directory, smoke ? new GitHubUpdates(new System.Net.Http.HttpClient(new StartupUpdateFixture())) : null);
+        }
+
+        private void PollStatus()
+        {
+            if (disconnected && DateTime.UtcNow < nextReconnect) return;
+            try
+            {
+                if (backend == null || !backend.Available)
+                {
+                    if (backend != null) backend.Dispose();
+                    Start(connection);
+                }
+                Refresh(null, false);
+            }
+            catch (Exception error) { ShowConnectionFailure(error); }
         }
 
         internal void ShowUpdateFallback() { Message("Das Update konnte nicht gestartet werden. Die vorherige Version ist wieder geöffnet."); }
@@ -202,7 +225,13 @@ namespace Dokju
         private void Start(Connection options)
         {
             backend = new Backend(directory, options.port, options.publicOrigin);
+            if (options.port == 0 && options.publicOrigin == null) options.port = new Uri(backend.Origin).Port;
             Label("ConnectionText").Text = (options.publicOrigin == null ? "Nur auf diesem Gerät" : "Portaladresse") + "\n" + backend.Origin;
+        }
+
+        private void SaveConnection(Connection options)
+        {
+            Installation.WriteAtomic(Path.Combine(directory, "connection.json"), Encoding.UTF8.GetBytes(Backend.Json.Serialize(options)));
         }
 
         private static string NormalizeOrigin(string value)
@@ -239,7 +268,7 @@ namespace Dokju
             try
             {
                 Start(next);
-                Installation.WriteAtomic(Path.Combine(directory, "connection.json"), Encoding.UTF8.GetBytes(Backend.Json.Serialize(next)));
+                SaveConnection(next);
             }
             catch
             {
@@ -261,6 +290,7 @@ namespace Dokju
 
         private void CaseDialog(CaseRow existing)
         {
+            if (disconnected) return;
             var profile = existing != null ? existing.info : dashboard.defaults;
             var dialog = new FormDialog(Window, existing == null ? "Neuer Vorgang" : "Vorgang bearbeiten",
                 existing == null ? "Nach dem Anlegen können Sie die Einladung direkt im Browser öffnen." :
@@ -323,13 +353,48 @@ namespace Dokju
             var latest = backend.Get<Dashboard>("/cases");
             string stamp = String.Join("|", latest.cases.Select(item => item.id + ":" +
                 String.Join(",", item.invites.Select(person => person.status + "/" + person.changed + "/" + person.until))));
-            if (!force && stamp == dataStamp) return;
+            if (!force && !disconnected && stamp == dataStamp) return;
             dashboard = latest;
+            bool recovered = disconnected;
+            disconnected = false;
+            SetCaseActions(true);
             Label("CaseCount").Text = latest.cases.Length.ToString(German);
             Label("OpenCount").Text = latest.cases.SelectMany(item => item.invites).Count(person => person.status == "pending").ToString(German);
             Label("ReadyCount").Text = latest.cases.Count(item => item.ready).ToString(German);
             Filter(selection);
             dataStamp = stamp;
+            if (recovered) Message("Verbindung wiederhergestellt. Die Statusanzeige ist aktuell.");
+        }
+
+        private void ShowConnectionFailure(Exception error)
+        {
+            disconnected = true;
+            nextReconnect = DateTime.UtcNow.AddSeconds(5);
+            qrKey = qrLink = null;
+            SetCaseActions(false);
+            Label("ReadyCount").Text = "–";
+            Label("OpenCount").Text = "–";
+            Label("ConnectionText").Text = "Verbindung unterbrochen";
+            ShowStatusUnavailable();
+            Message("Dokju versucht, die Verbindung wiederherzustellen. " + error.Message);
+        }
+
+        private void SetCaseActions(bool available)
+        {
+            foreach (var name in new[] { "NewButton", "FirstCaseButton", "EditButton", "ExportButton", "RenewButton", "WithdrawButton", "WithdrawalLinkButton", "VerifyButton" })
+                Button(name).IsEnabled = available;
+            Control<ListBox>("CaseList").IsEnabled = available;
+            Control<ComboBox>("PersonList").Visibility = available ? Visibility.Visible : Visibility.Hidden;
+            Label("PersonTime").Visibility = available ? Visibility.Visible : Visibility.Hidden;
+        }
+
+        private void ShowStatusUnavailable()
+        {
+            Label("DecisionState").Text = "Status derzeit nicht verfügbar";
+            Label("DecisionState").Foreground = Brush("#33465D");
+            Label("DecisionText").Text = "Warten Sie auf die erneute Prüfung, bevor Sie eine Aufnahme starten.";
+            Control<Border>("DecisionBand").Background = Brush("#EDF4F6");
+            Control<Border>("QrCard").Visibility = Visibility.Collapsed;
         }
 
         private void Filter() { Filter(null); }
@@ -391,6 +456,11 @@ namespace Dokju
                 list.SelectedIndex = Math.Min(index, item.invites.Length - 1);
             }
             finally { updating = false; }
+            if (disconnected)
+            {
+                ShowStatusUnavailable();
+                return;
+            }
             ShowPerson();
         }
 
@@ -398,7 +468,7 @@ namespace Dokju
         {
             var item = Selected();
             var person = (Person)Control<ComboBox>("PersonList").SelectedItem;
-            if (item == null || person == null) return;
+            if (disconnected || item == null || person == null) return;
             bool pending = person.status == "pending";
             Label("PersonTime").Text = pending ? "Einladungslink gültig bis " + When(person.until) :
                 person.changed == null ? "Die Einladung ist abgelaufen." : "Letzte Entscheidung am " + When(person.changed);
@@ -570,10 +640,14 @@ namespace Dokju
 
         public void Smoke()
         {
-            Window.ContentRendered += (sender, args) => Window.Dispatcher.BeginInvoke(new Action(() =>
+            Window.ContentRendered += (sender, args) => Window.Dispatcher.BeginInvoke(new Action(async () =>
             {
                 try
                 {
+                    var check = updates.StartupCheck;
+                    if (check == null) throw new IOException("Die Updateprüfung wurde beim Öffnen nicht ausgelöst.");
+                    await check;
+                    if (!Equals(Button("UpdateButton").Content, "Update verfügbar")) throw new IOException("Das Update wurde beim Öffnen nicht angezeigt.");
                     var item = backend.Post<CaseRow>("/cases", new
                     {
                         title = "Beratungsgespräch", reference = "AZ-42", count = 1, controller = "Verwaltung",
@@ -599,6 +673,13 @@ namespace Dokju
                     var qrBottom = qr.TransformToAncestor(detail).Transform(new Point(0, qr.ActualHeight)).Y;
                     if (qrBottom > detail.ViewportHeight + 1) throw new IOException("Der QR-Code wird im kleinsten Fenster abgeschnitten.");
                     Capture(Window, Path.Combine(directory, "compact.png"));
+                    backend.Dispose();
+                    ShowConnectionFailure(new IOException("Verbindung unterbrochen."));
+                    if (Button("ExportButton").IsEnabled || Control<Border>("QrCard").Visibility != Visibility.Collapsed ||
+                        Label("DecisionState").Text != "Status derzeit nicht verfügbar") throw new IOException("Der veraltete Status ist weiterhin sichtbar.");
+                    nextReconnect = DateTime.MinValue;
+                    PollStatus();
+                    if (disconnected || !Button("ExportButton").IsEnabled || qrLink == null) throw new IOException("Die Verbindung wurde nicht wiederhergestellt.");
                     updates.Show(window => Capture(window, Path.Combine(directory, "updates.png")));
                     var export = backend.Get<ExportResult>("/cases/" + Selected().id + "/export");
                     File.WriteAllBytes(Path.Combine(directory, "proof.pdf"), Convert.FromBase64String(export.pdf));
@@ -608,6 +689,25 @@ namespace Dokju
                 catch (Exception error) { File.WriteAllText(Path.Combine(directory, "smoke-error.txt"), error.ToString()); }
                 finally { Window.Close(); }
             }), DispatcherPriority.ApplicationIdle);
+        }
+
+        private sealed class StartupUpdateFixture : System.Net.Http.HttpMessageHandler
+        {
+            protected override System.Threading.Tasks.Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage request, CancellationToken cancellation)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                var segments = request.RequestUri.Segments;
+                var repository = segments[2] + segments[3].TrimEnd('/');
+                var commit = new string('a', 40);
+                var tag = Installation.TagFor(999999999, commit);
+                var json = Backend.Json.Serialize(new[] { new
+                {
+                    tag_name = tag,
+                    assets = new[] { new { name = Installation.Package, state = "uploaded", size = 123,
+                        digest = "sha256:" + new string('b', 64), browser_download_url = "https://github.com/" + repository + "/releases/download/" + tag + "/" + Installation.Package } }
+                } });
+                return System.Threading.Tasks.Task.FromResult(new System.Net.Http.HttpResponseMessage(HttpStatusCode.OK) { Content = new System.Net.Http.StringContent(json) });
+            }
         }
 
         private static void Capture(Window window, string path)

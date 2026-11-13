@@ -1,12 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import { RuleError, equal } from './store.mjs';
 import { languages, ui } from './text.mjs';
+import { logoPng } from './brand.mjs';
 
 const css = `
 :root{font:16px/1.6 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;color:#1a2739;background:#f3f5f8;color-scheme:light}
 *{box-sizing:border-box}body{margin:0}main{max-width:680px;margin:auto;padding:26px 16px 44px}
 header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:0 4px 20px}
-.brand{font-size:27px;font-weight:750;letter-spacing:-.045em}.brand b{display:inline-grid;place-items:center;background:#bee9dc;color:#11574e;border-radius:9px;width:34px;height:34px;margin-right:9px;font-size:20px;vertical-align:2px}
+.brand{display:inline-flex;align-items:center;gap:9px;font-size:27px;font-weight:750;letter-spacing:-.045em}.brand img{width:34px;height:34px;border-radius:8px}
 nav{display:flex;gap:5px;flex-wrap:wrap}nav a{color:#31475d;border:1px solid #c6d2dd;text-decoration:none;border-radius:8px;padding:5px 9px;font-size:13px}
 nav a[aria-current]{background:#def2ea;color:#07594d;font-weight:700;border-color:#80b7ad}article{background:white;border:1px solid #dbe2eb;border-radius:20px;padding:clamp(19px,5vw,38px);box-shadow:0 12px 36px #1523370c}
 h1{margin:14px 0 10px;line-height:1.12;font-size:clamp(27px,7vw,39px);letter-spacing:-.035em}h2{font-size:18px;margin:23px 0 3px}p{margin:7px 0 13px}.context{color:#53667a;overflow-wrap:anywhere}
@@ -29,7 +30,7 @@ function page(language, title, content, links = true) {
     `<a href="?lang=${code}" lang="${code === 'en' ? 'en' : 'de'}"${code === language ? ' aria-current="page"' : ''}>${{ de: 'Deutsch', einfach: 'Einfaches Deutsch', en: 'English' }[code]}</a>`
   ).join('');
   return `<!doctype html><html lang="${language === 'en' ? 'en' : 'de'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} | Dokju</title><style>${css}</style></head>
-    <body><main><header><span class="brand"><b aria-hidden="true">✓</b>Dokju</span>${links ? `<nav aria-label="${language === 'en' ? 'Language' : 'Sprache'}">${navigation}</nav>` : ''}</header>
+    <body><main><header><span class="brand"><img src="data:image/png;base64,${logoPng}" alt="" width="34" height="34">Dokju</span>${links ? `<nav aria-label="${language === 'en' ? 'Language' : 'Sprache'}">${navigation}</nav>` : ''}</header>
     <article>${content}</article></main></body></html>`;
 }
 
@@ -54,7 +55,7 @@ export function sendHtml(response, code, html) {
     'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
     // Keep invite tokens out of Referer while preserving Origin on same-site HTML form posts.
     'Referrer-Policy': 'strict-origin', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY',
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    'Content-Security-Policy': "default-src 'none'; img-src data:; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
   });
   response.end(html);
 }

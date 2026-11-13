@@ -29,7 +29,7 @@ namespace Dokju
     internal sealed class GitHubUpdates
     {
         private const int Limit = 150 * 1024 * 1024;
-        private static readonly HttpClient DefaultHttp = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+        private static readonly HttpClient DefaultHttp = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
         {
             Timeout = Timeout.InfiniteTimeSpan
         };

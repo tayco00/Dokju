@@ -26,13 +26,13 @@ Der Portaldienst läuft, solange Dokju geöffnet ist. Das aktuelle Release ist f
 
 ## GitHub-Updates
 
-**Updates** zeigt die installierte Buildnummer, den Commit und verfügbare Versionen. Dokju sucht kurz nach dem Start, alle sechs Stunden und auf Wunsch manuell nach Updates. Nach Klick auf **Installieren und neu starten** lädt Dokju das Paket, prüft es und startet neu. Bei einem Startfehler öffnet der Starter die vorherige Version. Bei einem Netzfehler bleibt der Arbeitsbereich benutzbar.
+**Updates** zeigt die installierte Buildnummer, den Commit und verfügbare Versionen. Dokju beginnt die Prüfung beim Öffnen des Hauptfensters im Hintergrund, wiederholt sie alle sechs Stunden und auf Wunsch manuell. Nach Klick auf **Installieren und neu starten** lädt Dokju das Paket, prüft es und startet neu. Bei einem Startfehler öffnet der Starter die vorherige Version. Bei einem Netzfehler bleibt der Arbeitsbereich benutzbar.
 
 Der Workflow in `.github/workflows/windows-release.yml` prüft Pull Requests und Pushes auf `main`. Bei einem erfolgreichen Push veröffentlicht er den Installer und das Update-Paket für den letzten Commit des Pushes. Reihenfolge und Commit-ID stehen im Release-Tag und im Paket. Der Updater wählt aus den 30 zuletzt gelisteten Releases den höchsten passenden Build und prüft dessen SHA-256-Wert vor dem Entpacken.
 
 1. Den Inhalt des Ordners `Dokju` als Wurzel eines öffentlichen GitHub-Repositories verwenden, `main` als Standardbranch setzen und GitHub Actions aktivieren.
 2. Auf `main` pushen und die Jobs in **Actions** prüfen. Nach der Veröffentlichung lädt und startet die Pipeline das öffentliche Paket mit demselben Updater wie die Desktop-App. Der Build kennt sein Repository aus den Release-Metadaten.
-3. Für das zuvor lokal gebaute Paket lässt sich das Repository einmalig unter **Updates** als `Konto/Repository` eintragen. Ein über GitHub veröffentlichter Build bindet sich an sein Veröffentlichungs-Repository. Die Desktop-App benötigt für öffentliche Releases keine GitHub-Zugangsdaten.
+3. Lokal gebaute Pakete verwenden standardmäßig `tayco00/Dokju`. Ein anderes öffentliches Repository kann unter **Updates** gewählt werden. Veröffentlichte Pakete verwenden ihr Veröffentlichungs-Repository. Die Desktop-App benötigt für öffentliche Releases keine GitHub-Zugangsdaten.
 
 Die Download-Prüfsumme bezieht sich auf das Paket im gewählten GitHub-Repository. Wer dort Releases veröffentlichen darf, bestimmt, welche Programmversionen die App anbietet. Die Windows-Programmdateien sind derzeit ohne Authenticode-Zertifikat gebaut.
 

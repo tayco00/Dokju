@@ -8,12 +8,19 @@ using System.Web.Script.Serialization;
 
 namespace Dokju
 {
+    internal sealed class BackendStartException : IOException
+    {
+        public readonly string Code;
+        internal BackendStartException(string message, string code) : base(message) { Code = code; }
+    }
+
     internal sealed class Backend : IDisposable
     {
         private readonly Process process;
         private bool disposed;
         public readonly string Origin;
         public static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 8000000 };
+        public bool Available { get { return !disposed && !process.HasExited; } }
 
         public Backend(string directory, int port, string publicOrigin)
         {
@@ -41,7 +48,7 @@ namespace Dokju
             {
                 process.BeginErrorReadLine();
                 var reply = Json.Deserialize<Handshake>(ReadLine(6000));
-                if (!String.IsNullOrWhiteSpace(reply.error)) throw new IOException(reply.error);
+                if (!String.IsNullOrWhiteSpace(reply.error)) throw new BackendStartException(reply.error, reply.code);
                 if (!Uri.IsWellFormedUriString(reply.origin, UriKind.Absolute))
                     throw new IOException("Der lokale Dokju-Dienst meldet eine ungültige Adresse.");
                 Origin = reply.origin;
@@ -69,7 +76,7 @@ namespace Dokju
 
         private T Request<T>(string method, string path, object data)
         {
-            if (disposed || process.HasExited) throw new IOException("Der lokale Dokju-Dienst ist beendet. Bitte Dokju erneut starten.");
+            if (!Available) throw new IOException("Der lokale Dokju-Dienst ist beendet.");
             var command = Json.Serialize(new { method = method, path = path, data = data });
             byte[] bytes = Encoding.UTF8.GetBytes(command + "\n");
             var stream = process.StandardInput.BaseStream;
@@ -116,6 +123,7 @@ namespace Dokju
         {
             public string origin { get; set; }
             public string error { get; set; }
+            public string code { get; set; }
         }
 
         public sealed class Reply<T>

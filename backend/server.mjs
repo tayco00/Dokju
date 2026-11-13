@@ -156,7 +156,7 @@ export async function run(testSocket) {
 }
 
 export function startupError(error) {
-  process.stdout.write(JSON.stringify({ error: error.message }) + '\n');
+  process.stdout.write(JSON.stringify({ error: error.message, code: error.code }) + '\n');
   process.exit(1);
 }
 

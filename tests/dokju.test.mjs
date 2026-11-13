@@ -105,6 +105,7 @@ test('Desktop and citizen flow survives a restart, preserves exact notices and r
   const english = await openForm(app, first.link + '?lang=en');
   const simple = await openForm(app, second.link + '?lang=einfach');
   assert.match(english.raw, /I consent/);
+  assert.match(english.raw, /<img src="data:image\/png;base64,iVBORw0KGgo/);
   assert.match(english.raw, /Özer &lt;Test&gt;/);
   assert.match(simple.raw, /Ja, ich bin einverstanden/);
   assert.equal((await submit(app, english, 'accepted', { Origin: 'http://different.test' })).status, 403);

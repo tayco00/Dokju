@@ -15,21 +15,28 @@ namespace Dokju
 {
     internal sealed class UpdatePanel : IDisposable
     {
+        private const string OfficialRepository = "tayco00/Dokju";
         private readonly Window owner;
         private readonly Button entry;
         private readonly string root;
         private readonly BuildIdentity build;
         private readonly DispatcherTimer timer;
         private readonly CancellationTokenSource lifetime = new CancellationTokenSource();
-        private readonly GitHubUpdates client = new GitHubUpdates();
+        private readonly GitHubUpdates client;
         private string repository;
         private UpdateOffer offer;
-        private bool busy;
+        private Task checkTask;
+        private bool checking;
+        private bool installing;
+        private bool disposed;
+        private string checkMessage = "Noch nicht geprüft.";
+        private event Action StateChanged;
 
-        internal UpdatePanel(Window owner, Button entry, string data)
+        internal UpdatePanel(Window owner, Button entry, string data, GitHubUpdates client = null)
         {
             this.owner = owner;
             this.entry = entry;
+            this.client = client ?? new GitHubUpdates();
             root = Installation.Root(data);
             build = BuildIdentity.Read(AppDomain.CurrentDomain.BaseDirectory);
             var settings = Path.Combine(root, "repository.txt");
@@ -39,30 +46,60 @@ namespace Dokju
                 var saved = File.ReadAllText(settings).Trim();
                 if (Installation.RepositoryIsValid(saved)) repository = saved;
             }
+            repository = repository ?? OfficialRepository;
             entry.Click += (sender, args) => Show();
-            timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
-            timer.Tick += async (sender, args) =>
-            {
-                timer.Interval = TimeSpan.FromHours(6);
-                if (repository == null || busy) return;
-                try { await Check(); }
-                catch (Exception) { }
-            };
-            timer.Start();
+            timer = new DispatcherTimer { Interval = TimeSpan.FromHours(6) };
+            timer.Tick += async (sender, args) => await Check();
+            owner.Loaded += CheckAtStartup;
         }
 
-        private async Task Check()
+        private async void CheckAtStartup(object sender, RoutedEventArgs args)
         {
-            busy = true;
+            owner.Loaded -= CheckAtStartup;
+            timer.Start();
+            await Check();
+        }
+
+        private Task Check()
+        {
+            if (disposed || installing || repository == null) return Task.FromResult(0);
+            if (checking) return checkTask;
+            checkTask = CheckRepository(repository);
+            return checkTask;
+        }
+
+        private async Task CheckRepository(string source)
+        {
+            checking = true;
+            checkMessage = "Dokju sucht nach Updates …";
+            entry.Content = "Prüfe Updates …";
+            NotifyState();
             try
             {
                 var state = Installation.Versions(root);
-                var baseline = Math.Max(build.sequence, Installation.ActiveSequence(root, state, repository));
-                offer = await client.Check(repository, baseline, state.rejected, lifetime.Token);
-                entry.Content = offer == null ? "Updates" : "Update verfügbar";
+                var baseline = Math.Max(build.sequence, Installation.ActiveSequence(root, state, source));
+                offer = await client.Check(source, baseline, state.rejected, lifetime.Token);
+                checkMessage = offer == null ? "Dokju ist auf dem neuesten verfügbaren Stand." : "Verfügbar · " + offer.Caption;
             }
-            finally { busy = false; }
+            catch (Exception error)
+            {
+                offer = null;
+                checkMessage = ErrorText(error);
+            }
+            finally
+            {
+                checking = false;
+                if (!disposed)
+                {
+                    entry.Content = offer == null ? "Updates" : "Update verfügbar";
+                    NotifyState();
+                }
+            }
         }
+
+        private void NotifyState() { if (StateChanged != null) StateChanged(); }
+
+        internal Task StartupCheck { get { return checkTask; } }
 
         internal void Show(Action<Window> snapshot = null)
         {
@@ -90,7 +127,8 @@ namespace Dokju
             layout.Children.Add(field);
             var explanation = new TextBlock
             {
-                Text = "Öffentliches Dokju-Repository im Format Konto/Repository. Beim Installieren wird Dokju kurz neu gestartet.",
+                Text = build.sequence > 0 ? "Dokju prüft beim Start automatisch. Sie entscheiden, wann ein verfügbares Update installiert wird." :
+                    "Öffentliches Dokju-Repository im Format Konto/Repository.",
                 TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 16)
             };
             layout.Children.Add(explanation);
@@ -109,37 +147,38 @@ namespace Dokju
             actions.Children.Add(install);
             Action showState = () =>
             {
+                if (installing) return;
                 var matching = offer != null && String.Equals(field.Text.Trim(), offer.Repository, StringComparison.OrdinalIgnoreCase);
-                install.IsEnabled = !busy && matching;
-                status.Text = matching ? "Verfügbar · " + offer.Caption : (repository == null ? "Noch kein Update-Repository hinterlegt." : "Neue Versionen können hier geprüft werden.");
+                check.IsEnabled = field.IsEnabled = !checking;
+                install.IsEnabled = !checking && matching;
+                status.Text = !String.Equals(field.Text.Trim(), repository, StringComparison.OrdinalIgnoreCase) ?
+                    "Wählen Sie Jetzt prüfen, um dieses Repository zu verwenden." : checkMessage;
             };
             showState();
+            StateChanged += showState;
             field.TextChanged += (sender, args) => showState();
             check.Click += async (sender, args) =>
             {
-                if (busy) { status.Text = "Die automatische Prüfung läuft bereits."; return; }
+                if (checking || installing) return;
                 var chosen = field.Text.Trim();
                 if (!Installation.RepositoryIsValid(chosen)) { status.Text = "Bitte Konto/Repository eingeben."; return; }
-                check.IsEnabled = install.IsEnabled = field.IsEnabled = false;
-                status.Text = "GitHub wird geprüft …";
                 try
                 {
-                    Directory.CreateDirectory(root);
-                    Installation.WriteAtomic(Path.Combine(root, "repository.txt"), Encoding.UTF8.GetBytes(chosen));
-                    repository = chosen;
-                    offer = null;
-                    entry.Content = "Updates";
+                    if (!String.Equals(chosen, repository, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Directory.CreateDirectory(root);
+                        Installation.WriteAtomic(Path.Combine(root, "repository.txt"), Encoding.UTF8.GetBytes(chosen));
+                        repository = chosen;
+                        offer = null;
+                    }
                     await Check();
-                    showState();
-                    if (offer == null) status.Text = "Keine neuere veröffentlichte Version gefunden.";
                 }
                 catch (Exception error) { status.Text = ErrorText(error); }
-                finally { check.IsEnabled = field.IsEnabled = true; }
             };
             install.Click += async (sender, args) =>
             {
-                if (busy || offer == null) return;
-                busy = true;
+                if (checking || installing || offer == null || !String.Equals(field.Text.Trim(), offer.Repository, StringComparison.OrdinalIgnoreCase)) return;
+                installing = true;
                 check.IsEnabled = install.IsEnabled = field.IsEnabled = false;
                 bar.Value = 0;
                 bar.Visibility = Visibility.Visible;
@@ -147,25 +186,33 @@ namespace Dokju
                 var selected = offer;
                 using (var operation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token))
                 {
-                    System.ComponentModel.CancelEventHandler closing = (s, e) => operation.Cancel();
+                    bool restarting = false;
+                    System.ComponentModel.CancelEventHandler closing = (s, e) =>
+                    {
+                        if (restarting) e.Cancel = true;
+                        else operation.Cancel();
+                    };
                     window.Closing += closing;
                     try
                     {
                         var progress = new Progress<int>(value => bar.Value = value);
                         await client.Stage(root, selected, progress, operation.Token);
                         operation.Token.ThrowIfCancellationRequested();
+                        restarting = true;
+                        status.Text = "Dokju bereitet den Neustart vor …";
                         await PrepareRestart(selected.Tag, operation.Token);
+                        window.Closing -= closing;
                         window.Close();
                         owner.Close();
                     }
-                    catch (OperationCanceledException) { status.Text = "Der Download wurde beendet oder hat zu lange gedauert."; }
-                    catch (Exception error) { status.Text = ErrorText(error); }
+                    catch (OperationCanceledException) { checkMessage = "Der Download wurde beendet oder hat zu lange gedauert."; }
+                    catch (Exception error) { checkMessage = ErrorText(error); }
                     finally
                     {
                         window.Closing -= closing;
-                        busy = false;
+                        installing = false;
                         bar.Visibility = Visibility.Collapsed;
-                        check.IsEnabled = field.IsEnabled = install.IsEnabled = true;
+                        showState();
                     }
                 }
             };
@@ -176,7 +223,8 @@ namespace Dokju
                 catch (Exception error) { snapshotError = error; }
                 finally { window.Close(); }
             };
-            window.ShowDialog();
+            try { window.ShowDialog(); }
+            finally { StateChanged -= showState; }
             if (snapshotError != null) throw snapshotError;
         }
 
@@ -210,6 +258,8 @@ namespace Dokju
 
         public void Dispose()
         {
+            disposed = true;
+            owner.Loaded -= CheckAtStartup;
             timer.Stop();
             lifetime.Cancel();
             lifetime.Dispose();
