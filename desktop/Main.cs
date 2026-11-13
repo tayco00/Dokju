@@ -226,6 +226,11 @@ namespace Dokju
         {
             backend = new Backend(directory, options.port, options.publicOrigin);
             if (options.port == 0 && options.publicOrigin == null) options.port = new Uri(backend.Origin).Port;
+            ShowConnection(options);
+        }
+
+        private void ShowConnection(Connection options)
+        {
             Label("ConnectionText").Text = (options.publicOrigin == null ? "Nur auf diesem Gerät" : "Portaladresse") + "\n" + backend.Origin;
         }
 
@@ -263,7 +268,7 @@ namespace Dokju
             };
             if (!dialog.Show("Verbindung übernehmen")) return;
             if (next.publicOrigin == connection.publicOrigin && next.port == connection.port) return;
-            backend.Dispose();
+            if (backend != null) backend.Dispose();
             backend = null;
             try
             {
@@ -273,7 +278,8 @@ namespace Dokju
             catch
             {
                 if (backend != null) backend.Dispose();
-                Start(connection);
+                try { Start(connection); }
+                catch (Exception error) { ShowConnectionFailure(error); }
                 throw;
             }
             connection = next;
@@ -363,7 +369,11 @@ namespace Dokju
             Label("ReadyCount").Text = latest.cases.Count(item => item.ready).ToString(German);
             Filter(selection);
             dataStamp = stamp;
-            if (recovered) Message("Verbindung wiederhergestellt. Die Statusanzeige ist aktuell.");
+            if (recovered)
+            {
+                ShowConnection(connection);
+                Message("Verbindung wiederhergestellt. Die Statusanzeige ist aktuell.");
+            }
         }
 
         private void ShowConnectionFailure(Exception error)
@@ -673,13 +683,16 @@ namespace Dokju
                     var qrBottom = qr.TransformToAncestor(detail).Transform(new Point(0, qr.ActualHeight)).Y;
                     if (qrBottom > detail.ViewportHeight + 1) throw new IOException("Der QR-Code wird im kleinsten Fenster abgeschnitten.");
                     Capture(Window, Path.Combine(directory, "compact.png"));
-                    backend.Dispose();
                     ShowConnectionFailure(new IOException("Verbindung unterbrochen."));
                     if (Button("ExportButton").IsEnabled || Control<Border>("QrCard").Visibility != Visibility.Collapsed ||
                         Label("DecisionState").Text != "Status derzeit nicht verfügbar") throw new IOException("Der veraltete Status ist weiterhin sichtbar.");
                     nextReconnect = DateTime.MinValue;
                     PollStatus();
-                    if (disconnected || !Button("ExportButton").IsEnabled || qrLink == null) throw new IOException("Die Verbindung wurde nicht wiederhergestellt.");
+                    if (disconnected || !Button("ExportButton").IsEnabled || qrLink == null || !Label("ConnectionText").Text.Contains(backend.Origin))
+                        throw new IOException("Die Verbindung wurde nicht wiederhergestellt.");
+                    backend.Dispose();
+                    PollStatus();
+                    if (disconnected || !backend.Available) throw new IOException("Der lokale Dienst wurde nicht neu gestartet.");
                     updates.Show(window => Capture(window, Path.Combine(directory, "updates.png")));
                     var export = backend.Get<ExportResult>("/cases/" + Selected().id + "/export");
                     File.WriteAllBytes(Path.Combine(directory, "proof.pdf"), Convert.FromBase64String(export.pdf));
