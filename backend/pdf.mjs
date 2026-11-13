@@ -146,7 +146,7 @@ export function proofPdf({ evidence, seal }, fontFile = join(process.env.WINDIR 
   for (const person of evidence.participants) {
     block(`Person ${person.number} · ${statusText[person.status]} · Kennung ${person.id}`);
     for (const event of person.events)
-      block(`    ${date(event.at)} · ${statusText[event.kind]} · Sprache ${event.language}`);
+      block(`    ${date(event.at)} · ${statusText[event.kind]} · ${event.source === 'workspace' ? 'Am Arbeitsplatz erfasst' : `Sprache ${event.language}`}`);
   }
   section('Einwilligungsinformationen');
   for (const [language, notice] of Object.entries(evidence.notices)) {

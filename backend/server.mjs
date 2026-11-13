@@ -87,17 +87,28 @@ export async function run(testSocket) {
     if (method === 'POST' && (!data || typeof data !== 'object' || Array.isArray(data)))
       throw new RuleError('Ungültige Eingabe.');
     if (method === 'GET' && url.pathname === '/cases')
-      return send(200, { origin, cases: store.data.cases.map(item => store.view(item)).reverse() });
+      return send(200, { origin, ...(store.data.defaults ? { defaults: store.data.defaults } : {}), cases: store.data.cases.map(item => store.view(item)).reverse() });
     if (method === 'POST' && url.pathname === '/cases')
       return send(201, store.create(data));
     if (method === 'POST' && url.pathname === '/verify')
       return send(200, store.verify(data.proof ?? data, data.pdfHash));
-    const renew = /^\/cases\/([0-9a-f-]{36})\/renew$/.exec(url.pathname);
-    if (method === 'POST' && renew) return send(200, store.renew(renew[1], data.person));
-    const match = /^\/cases\/([0-9a-f-]{36})\/(status|export|invite)$/.exec(url.pathname);
+    const change = /^\/cases\/([0-9a-f-]{36})\/(edit|renew|withdraw)$/.exec(url.pathname);
+    if (method === 'POST' && change) {
+      const [, id, action] = change;
+      if (action === 'edit') return send(200, store.edit(id, data));
+      if (action === 'renew') return send(200, store.renew(id, data.person));
+      return send(200, store.withdraw(id, data.person));
+    }
+    const match = /^\/cases\/([0-9a-f-]{36})\/(status|export|invite|withdrawal-link)$/.exec(url.pathname);
     if (method !== 'GET' || !match) return send(404, { error: 'Unbekannte Aktion.' });
     const [, id, action] = match;
     if (action === 'status') return send(200, store.view(store.lookup(id)));
+    if (action === 'withdrawal-link') {
+      const item = store.lookup(id);
+      const person = item.invites.find(invite => String(invite.number) === url.searchParams.get('person'));
+      if (!person || store.status(item, person) !== 'accepted') return send(409, { error: 'Für diese Person ist kein Widerrufslink verfügbar.' });
+      return send(200, { link: `${origin}/w/${store.token(person, 'withdraw')}` });
+    }
     if (action === 'invite') {
       const item = store.view(store.lookup(id));
       const person = item.invites.find(invite => String(invite.number) === url.searchParams.get('person'));

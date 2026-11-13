@@ -100,6 +100,11 @@ namespace Dokju
             SetWindowIcon();
             Window.SizeChanged += (sender, args) => AdaptLayout(args.NewSize.Width);
             Button("NewButton").Click += (sender, args) => Run(NewCase);
+            Button("FirstCaseButton").Click += (sender, args) => Run(NewCase);
+            Button("EditButton").Click += (sender, args) => Run(() => CaseDialog(Selected()));
+            Button("WithdrawButton").Click += (sender, args) => Run(Withdraw);
+            Button("WithdrawalLinkButton").Click += (sender, args) => Run(CopyWithdrawalLink);
+            Button("MobileButton").Click += (sender, args) => Run(Configure);
             Button("ConnectionButton").Click += (sender, args) => Run(Configure);
             Button("VerifyButton").Click += (sender, args) => Run(Verify);
             Button("ExportButton").Click += (sender, args) => Run(Export);
@@ -114,6 +119,9 @@ namespace Dokju
                 Clipboard.SetText(qrLink);
                 Message("Einladungslink kopiert.");
             });
+            var newCommand = new System.Windows.Input.RoutedCommand("NeuerVorgang", typeof(Workspace));
+            Window.InputBindings.Add(new System.Windows.Input.KeyBinding(newCommand, System.Windows.Input.Key.N, System.Windows.Input.ModifierKeys.Control));
+            Window.CommandBindings.Add(new System.Windows.Input.CommandBinding(newCommand, (sender, args) => Run(NewCase)));
             Control<TextBox>("SearchBox").TextChanged += (sender, args) => Run(Filter);
             Control<ComboBox>("CaseFilter").SelectionChanged += (sender, args) => Run(Filter);
             Control<ListBox>("CaseList").SelectionChanged += (sender, args) => { if (!updating) Run(ShowCase); };
@@ -147,6 +155,7 @@ namespace Dokju
             Label("DetailTitle").FontSize = compact ? 22 : 26;
             Button("ExportButton").Content = compact ? "Exportieren" : "Nachweis exportieren";
             Button("OpenButton").Content = compact ? "Browser öffnen" : "Im Browser öffnen";
+            Button("RenewButton").Content = compact ? "Link erneuern" : "Einladung erneuern";
             bool mobile = connection != null && connection.publicOrigin != null;
             int qrSize = compact ? 135 : 180;
             var qr = Control<Image>("QrImage");
@@ -158,11 +167,12 @@ namespace Dokju
 
         private void SetWindowIcon()
         {
-            var drawing = new DrawingGroup();
-            drawing.Children.Add(new GeometryDrawing(Brush("#08665D"), null, new RectangleGeometry(new Rect(0, 0, 32, 32), 7, 7)));
-            var check = Geometry.Parse("M8,16 L13,21 24,10");
-            drawing.Children.Add(new GeometryDrawing(null, new Pen(Brushes.White, 3), check));
-            Window.Icon = new DrawingImage(drawing);
+            using (var asset = Assembly.GetExecutingAssembly().GetManifestResourceStream("Dokju.Logo.png"))
+            {
+                var logo = BitmapFrame.Create(asset, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+                Window.Icon = logo;
+                Control<Image>("BrandLogo").Source = logo;
+            }
         }
 
         private Connection LoadConnection()
@@ -246,28 +256,52 @@ namespace Dokju
 
         private void NewCase()
         {
-            var dialog = new FormDialog(Window, "Neuer Vorgang", "Legen Sie die Angaben fest, die Teilnehmende vor ihrer Entscheidung sehen.");
-            var title = dialog.Field("Gesprächsbezeichnung", "", 90);
-            var reference = dialog.Field("Aktenzeichen", "", 64);
-            var count = dialog.Field("Teilnehmende (1 bis 12)", "1", 2);
-            var controller = dialog.Field("Verantwortliche Stelle", "", 100);
-            var provider = dialog.Field("KI-Anbieter", "", 100);
-            var contact = dialog.Field("Datenschutzkontakt", "", 110);
-            var audioDays = dialog.Field("Aufbewahrung von Aufnahme und Transkript (Tage)", "", 3);
-            var proofDays = dialog.Field("Aufbewahrung des Nachweises in Dokju (Tage)", "", 4);
-            dialog.Note("Der QR-Link gilt 30 Minuten. Pro teilnehmender Person wird ein eigener Link erstellt.");
+            CaseDialog(null);
+        }
+
+        private void CaseDialog(CaseRow existing)
+        {
+            var profile = existing != null ? existing.info : dashboard.defaults;
+            var dialog = new FormDialog(Window, existing == null ? "Neuer Vorgang" : "Vorgang bearbeiten",
+                existing == null ? "Nach dem Anlegen können Sie die Einladung direkt im Browser öffnen." :
+                "Wenn Sie Angaben ändern, erstellt Dokju neue Einladungen. Bereits geteilte Links werden ungültig.");
+            var title = dialog.Field("Gesprächsbezeichnung", existing == null ? "" : existing.title, 90);
+            var reference = dialog.Field("Aktenzeichen", existing == null ? "" : existing.reference, 64);
+            var count = dialog.Field("Teilnehmende (1 bis 12)", existing == null ? "1" : existing.invites.Length.ToString(German), 2);
+            dialog.Section("Angaben zur Einwilligung");
+            var controller = dialog.Field("Verantwortliche Stelle", profile == null ? "" : profile.controller, 100);
+            var provider = dialog.Field("KI-Anbieter", profile == null ? "" : profile.provider, 100);
+            var contact = dialog.Field("Datenschutzkontakt", profile == null ? "" : profile.contact, 110);
+            var audioDays = dialog.Field("Frist für Aufnahme und Transkript (Tage)", profile == null ? "" : profile.audioDays.ToString(German), 3);
+            var proofDays = dialog.Field("Frist für den Nachweis in Dokju (Tage)", profile == null ? "" : profile.proofDays.ToString(German), 4);
+            var remember = existing == null ? dialog.Check("Diese Angaben für neue Vorgänge merken", true) : null;
             string id = null;
+            bool changed = false;
             dialog.Accept = () =>
             {
-                var item = backend.Post<CaseRow>("/cases", new
+                var values = new
                 {
-                    title = title.Text, reference = reference.Text, count = Number(count),
-                    controller = controller.Text, provider = provider.Text, contact = contact.Text,
-                    audioDays = Number(audioDays), proofDays = Number(proofDays)
-                });
-                id = item.id;
+                    title = FormDialog.Required(title, "Bitte eine Gesprächsbezeichnung eingeben."),
+                    reference = FormDialog.Required(reference, "Bitte ein Aktenzeichen eingeben."),
+                    count = FormDialog.InRange(count, 1, 12, "Bitte 1 bis 12 Teilnehmende eingeben."),
+                    controller = FormDialog.Required(controller, "Bitte die verantwortliche Stelle eingeben."),
+                    provider = FormDialog.Required(provider, "Bitte den KI-Anbieter eingeben."),
+                    contact = FormDialog.Required(contact, "Bitte einen Datenschutzkontakt eingeben."),
+                    audioDays = FormDialog.InRange(audioDays, 1, 365, "Bitte für Aufnahme und Transkript 1 bis 365 Tage eingeben."),
+                    proofDays = FormDialog.InRange(proofDays, 1, 3650, "Bitte für den Nachweis 1 bis 3650 Tage eingeben."),
+                    remember = remember != null && remember.IsChecked == true
+                };
+                if (existing == null) id = backend.Post<CaseRow>("/cases", values).id;
+                else changed = backend.Post<CaseEdit>("/cases/" + existing.id + "/edit", values).changed;
             };
-            if (dialog.Show("Vorgang anlegen")) Reveal(id);
+            if (!dialog.Show(existing == null ? "Vorgang anlegen" : "Änderungen speichern")) return;
+            if (existing == null) Reveal(id);
+            else if (changed)
+            {
+                qrKey = null;
+                Refresh(existing.id, true);
+                Message("Vorgang aktualisiert. Die neuen Einladungen können geteilt werden.");
+            }
         }
 
         private static int Number(TextBox field)
@@ -331,10 +365,15 @@ namespace Dokju
             if (item == null)
             {
                 activeId = null;
+                bool empty = dashboard.cases.Length == 0;
+                Label("EmptyTitle").Text = empty ? "Erste Einwilligung erfassen" : "Keine passenden Vorgänge";
+                Label("EmptyHint").Text = empty ? "Vorgang anlegen, Einladung öffnen und die Entscheidung für die Akte sichern." : "Ändern Sie den Suchbegriff oder den Statusfilter.";
+                Button("FirstCaseButton").Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
                 return;
             }
             Label("DetailTitle").Text = item.title;
             Label("DetailReference").Text = item.reference + "  ·  " + item.info.controller;
+            Button("EditButton").Visibility = item.editable ? Visibility.Visible : Visibility.Collapsed;
             bool blocked = item.FilterState == 3;
             Label("DecisionState").Text = item.ready ? "Freigegeben" : blocked ? "Blockiert" : "Ausstehend";
             Label("DecisionText").Text = blocked ? "Mindestens eine Einladung wurde abgelehnt, ist abgelaufen oder wurde widerrufen." :
@@ -363,7 +402,10 @@ namespace Dokju
             bool pending = person.status == "pending";
             Label("PersonTime").Text = pending ? "Einladungslink gültig bis " + When(person.until) :
                 person.changed == null ? "Die Einladung ist abgelaufen." : "Letzte Entscheidung am " + When(person.changed);
-            Button("RenewButton").Visibility = person.status == "expired" ? Visibility.Visible : Visibility.Collapsed;
+            Button("RenewButton").Visibility = pending || person.status == "expired" ? Visibility.Visible : Visibility.Collapsed;
+            Button("WithdrawButton").Visibility = person.status == "accepted" ? Visibility.Visible : Visibility.Collapsed;
+            Button("WithdrawalLinkButton").Visibility = person.status == "accepted" && connection.publicOrigin != null ? Visibility.Visible : Visibility.Collapsed;
+            Button("MobileButton").Visibility = connection.publicOrigin == null ? Visibility.Visible : Visibility.Collapsed;
             Control<Border>("QrCard").Visibility = pending ? Visibility.Visible : Visibility.Collapsed;
             if (!pending)
             {
@@ -394,9 +436,36 @@ namespace Dokju
             var item = Selected();
             var person = (Person)Control<ComboBox>("PersonList").SelectedItem;
             if (item == null || person == null) return;
+            if (person.status == "pending" && MessageBox.Show(Window, "Der bisherige Link wird ungültig. Neue Einladung erstellen?",
+                "Einladung erneuern", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
             backend.Post<CaseRow>("/cases/" + item.id + "/renew", new { person = person.number });
+            qrKey = null;
             Refresh(item.id, true);
-            Message("Ein neuer QR-Code ist verfügbar.");
+            Message("Die neue Einladung ist verfügbar.");
+        }
+
+        private void Withdraw()
+        {
+            var item = Selected();
+            var person = (Person)Control<ComboBox>("PersonList").SelectedItem;
+            if (item == null || person == null || person.status != "accepted") return;
+            if (MessageBox.Show(Window, "Hat Person " + person.number + " ihre Einwilligung widerrufen? Dokju hebt die Freigabe auf. Informieren Sie gegebenenfalls den KI-Anbieter.",
+                "Widerruf erfassen", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+            backend.Post<CaseRow>("/cases/" + item.id + "/withdraw", new { person = person.number });
+            Refresh(item.id, true);
+            Message("Widerruf erfasst. Die Freigabe ist aufgehoben.");
+        }
+
+        private void CopyWithdrawalLink()
+        {
+            var item = Selected();
+            var person = (Person)Control<ComboBox>("PersonList").SelectedItem;
+            if (item == null || person == null || person.status != "accepted") return;
+            if (MessageBox.Show(Window, "Diesen persönlichen Link ausschließlich an Person " + person.number + " weitergeben.",
+                "Widerrufslink kopieren", MessageBoxButton.OKCancel, MessageBoxImage.Information) != MessageBoxResult.OK) return;
+            var link = backend.Get<Invitation>("/cases/" + item.id + "/withdrawal-link?person=" + person.number).link;
+            Clipboard.SetText(link);
+            Message("Widerrufslink kopiert.");
         }
 
         private static BitmapSource DrawQr(string[] rows)
@@ -586,6 +655,7 @@ namespace Dokju
     public sealed class Dashboard
     {
         public CaseRow[] cases { get; set; }
+        public Profile defaults { get; set; }
     }
     public sealed class Profile
     {
@@ -605,6 +675,7 @@ namespace Dokju
         public Profile info { get; set; }
         public Person[] invites { get; set; }
         public bool ready { get; set; }
+        public bool editable { get; set; }
         public int FilterState { get { return ready ? 2 : invites.Any(person => person.status != "accepted" && person.status != "pending") ? 3 : 1; } }
         public int AcceptedCount { get { return invites.Count(person => person.status == "accepted"); } }
         public string StateLabel { get { return (FilterState == 2 ? "Freigegeben" : FilterState == 3 ? "Blockiert" : "Offen") +
@@ -624,6 +695,7 @@ namespace Dokju
         public string Summary { get { return "Person " + number + "  ·  " + Text[status]; } }
     }
     public sealed class Invitation { public string link { get; set; } public string[] qr { get; set; } }
+    public sealed class CaseEdit { public bool changed { get; set; } }
     public sealed class ExportResult { public string pdf { get; set; } public object proof { get; set; } }
     public sealed class Verification { public bool valid { get; set; } public bool? document { get; set; } }
 }

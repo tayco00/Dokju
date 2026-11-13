@@ -26,7 +26,8 @@ $sources = Get-ChildItem -LiteralPath (Join-Path $project 'desktop') -Filter '*.
     ForEach-Object FullName
 $layout = Join-Path $project 'desktop\Main.xaml'
 $icon = Join-Path $project 'desktop\Dokju.ico'
-& $compiler /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 "/out:$exe" "/win32icon:$icon" "/resource:$layout,Dokju.Main.xaml" @references $shared @sources
+$brand = Join-Path $project 'desktop\Dokju.png'
+& $compiler /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 "/out:$exe" "/win32icon:$icon" "/resource:$layout,Dokju.Main.xaml" "/resource:$brand,Dokju.Logo.png" @references $shared @sources
 if ($LASTEXITCODE -ne 0) { throw 'Kompilierung fehlgeschlagen.' }
 & $compiler /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 "/out:$starter" "/win32icon:$icon" @references $shared (Join-Path $project 'launcher\Program.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Kompilierung des Starters fehlgeschlagen.' }

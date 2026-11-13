@@ -181,6 +181,37 @@ test('Mobile portal links use the configured HTTPS origin and secure cookies', a
   assert.equal((await submit(app, form, 'accepted', { Origin: app.origin })).status, 303);
   const receipt = await (await app.citizen(form.url, { headers: { Cookie: form.cookie } })).text();
   assert.match(receipt, /href="https:\/\/einwilligung\.example\/w\//);
+  const recovered = await app.request(base + '/withdrawal-link?person=1');
+  assert.equal(recovered.status, 200);
+  assert.ok(receipt.includes(recovered.value.link));
+});
+
+test('Editing replaces unclaimed links and a workplace withdrawal preserves the original decision', async t => {
+  const directory = temporary(t);
+  const key = randomBytes(32);
+  let app = await launch(directory, key);
+  t.after(async () => { await app.stop(); });
+  const created = await app.request('/cases', { ...fixture, count: 1, remember: true });
+  const base = '/cases/' + created.value.id;
+  const original = (await app.request(base + '/invite?person=1')).value.link;
+  assert.equal((await app.request(base + '/edit', { ...fixture, count: 1 })).value.changed, false);
+  assert.equal((await app.request(base + '/invite?person=1')).value.link, original);
+  assert.equal((await app.request(base + '/edit', { ...fixture, count: 1, title: 'Berichtigung' })).value.changed, true);
+  assert.equal((await app.citizen(original)).status, 404);
+  const link = (await app.request(base + '/invite?person=1')).value.link;
+  const form = await openForm(app, link);
+  assert.equal((await submit(app, form, 'accepted')).status, 303);
+  assert.equal((await app.request(base + '/edit', { ...fixture, count: 1 })).status, 409);
+  assert.equal((await app.citizen(app.origin + base + '/withdrawal-link?person=1')).status, 404);
+  assert.equal((await app.request(base + '/withdraw', { person: 1 })).value.ready, false);
+  assert.equal((await app.request(base + '/withdraw', { person: 1 })).status, 200);
+  assert.equal((await app.request(base + '/withdrawal-link?person=1')).status, 409);
+  const { evidence } = (await app.request(base + '/export')).value.proof;
+  assert.deepEqual(evidence.participants[0].events.map(event => [event.kind, event.source]), [['accepted', undefined], ['withdrawn', 'workspace']]);
+  await app.stop();
+  app = await launch(directory, key);
+  assert.equal((await app.request('/cases')).value.defaults.controller, fixture.controller);
+  assert.equal((await app.request(base + '/status')).value.invites[0].status, 'withdrawn');
 });
 
 test('Parallel decisions only commit once and a refusal blocks recording', async t => {

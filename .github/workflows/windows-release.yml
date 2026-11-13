@@ -30,13 +30,26 @@ jobs:
       - name: Anwendungs- und Updatetests
         shell: pwsh
         run: ./Test.ps1 -Package
-      - name: Prüfsumme erstellen
+      - name: Windows-Installer erstellen und prüfen
         shell: pwsh
-        run: (Get-FileHash -LiteralPath Dokju.zip -Algorithm SHA256).Hash | Set-Content -LiteralPath Dokju.sha256
+        run: |
+          $compiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          $iscc = if ($compiler) { $compiler.Source } else { Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe' }
+          if (!(Test-Path -LiteralPath $iscc)) { throw 'Der Inno-Setup-Compiler wurde nicht gefunden.' }
+          & $iscc "/DBuildNumber=$env:GITHUB_RUN_NUMBER" './installer/Dokju.iss'
+          if ($LASTEXITCODE -ne 0) { throw 'Der Installer konnte nicht gebaut werden.' }
+          ./installer/Verify-Setup.ps1
+      - name: Prüfsummen erstellen
+        shell: pwsh
+        run: |
+          $hashes = [ordered]@{}
+          foreach ($name in @('Dokju-Setup.exe', 'Dokju.zip')) { $hashes[$name] = (Get-FileHash -LiteralPath $name -Algorithm SHA256).Hash }
+          $hashes | ConvertTo-Json | Set-Content -LiteralPath Dokju.sha256
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: dokju-windows
           path: |
+            Dokju-Setup.exe
             Dokju.zip
             Dokju.sha256
           compression-level: 0
@@ -59,8 +72,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $expected = (Get-Content -LiteralPath Dokju.sha256 -Raw).Trim()
-          if ((Get-FileHash -LiteralPath Dokju.zip -Algorithm SHA256).Hash -ne $expected) { throw 'Die Prüfsumme des Build-Artefakts stimmt nicht.' }
+          $expected = Get-Content -LiteralPath Dokju.sha256 -Raw | ConvertFrom-Json -AsHashtable
+          foreach ($name in @('Dokju-Setup.exe', 'Dokju.zip')) {
+            if ((Get-FileHash -LiteralPath $name -Algorithm SHA256).Hash -ne $expected[$name]) { throw "Die Prüfsumme für $name stimmt nicht." }
+          }
           $tag = "dokju-$env:GITHUB_RUN_NUMBER-$env:GITHUB_SHA"
           $previousNativeMode = $PSNativeCommandUseErrorActionPreference
           $PSNativeCommandUseErrorActionPreference = $false
@@ -68,17 +83,18 @@ jobs:
           $exists = $LASTEXITCODE -eq 0
           $PSNativeCommandUseErrorActionPreference = $previousNativeMode
           if (!$exists) {
-            gh release create $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Dokju · Build $env:GITHUB_RUN_NUMBER" --notes "Commit $env:GITHUB_SHA" --draft
+            $notes = "Windows-Installation: Dokju-Setup.exe öffnen. Dokju.zip enthält die portable Ausgabe und das Paket für automatische Updates.`n`nCommit $env:GITHUB_SHA"
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Dokju · Build $env:GITHUB_RUN_NUMBER" --notes $notes --draft
             if ($LASTEXITCODE -ne 0) { throw 'Der Release-Entwurf konnte nicht erstellt werden.' }
           } else {
             $published = $release | ConvertFrom-Json
             if (!$published.isDraft) {
-              if ($published.assets.name -notcontains 'Dokju.zip') { throw 'Im veröffentlichten Release fehlt Dokju.zip.' }
+              if ($published.assets.name -notcontains 'Dokju.zip' -or $published.assets.name -notcontains 'Dokju-Setup.exe') { throw 'Im veröffentlichten Release fehlt ein Windows-Paket.' }
               exit 0
             }
           }
-          gh release upload $tag Dokju.zip --repo $env:GITHUB_REPOSITORY --clobber
-          if ($LASTEXITCODE -ne 0) { throw 'Das Windows-Paket konnte nicht hochgeladen werden.' }
+          gh release upload $tag Dokju-Setup.exe Dokju.zip --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Die Windows-Pakete konnten nicht hochgeladen werden.' }
           $head = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha
           if ($LASTEXITCODE -ne 0) { throw 'Der aktuelle Commit auf main konnte nicht ermittelt werden.' }
           $latest = if ($head -eq $env:GITHUB_SHA) { '--latest' } else { '--latest=false' }

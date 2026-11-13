@@ -4,11 +4,15 @@ Dokju ist eine Windows-Desktopanwendung für die Verwaltung digitaler Einwilligu
 
 ## Starten
 
-1. `Dokju.zip` vollständig entpacken und `Dokju.exe` im obersten Ordner öffnen. Das Windows-x64-Paket bringt Node.js mit und verwendet .NET Framework 4.8. Der Starter lädt beim nächsten Öffnen die zuletzt aktivierte Version. Den entpackten Startordner dafür aufbewahren.
-2. **Neuer Vorgang** wählen. Die verantwortliche Stelle, den KI-Anbieter, den Datenschutzkontakt und die für den Vorgang geltenden Aufbewahrungsfristen eintragen.
+1. [Dokju-Setup.exe](https://github.com/tayco00/Dokju/releases/latest/download/Dokju-Setup.exe) öffnen und den Installer abschließen. Dokju erscheint im Startmenü und unter **Einstellungen → Apps → Installierte Apps**. Die Installation gilt für das aktuelle Windows-Konto und bringt Node.js mit. `Dokju.zip` steht als portable Ausgabe zur Verfügung.
+2. **Neuer Vorgang** wählen. Beim ersten Vorgang die verantwortliche Stelle, den KI-Anbieter, den Datenschutzkontakt und die geltenden Aufbewahrungsfristen eintragen. Auf Wunsch übernimmt Dokju diese Angaben beim nächsten Vorgang. `Strg+N` öffnet das Formular direkt.
 3. **Ich stimme zu** wählen und den persönlichen Widerrufslink öffnen oder für später speichern. Der Desktop aktualisiert den Status alle zwei Sekunden.
 4. **Zustimmung widerrufen** wählen. Dokju setzt die Freigabe zurück und zeigt den Widerruf bei der betroffenen Person an.
 5. **Nachweis exportieren** wählen. Das PDF lässt sich in der Akte ablegen. Beim ZIP-Export bindet Dokju PDF und JSON-Nachweis aneinander. **Nachweis prüfen** erkennt Änderungen an beiden Dateien. Ältere Dokju-Exporte lassen sich weiterhin anhand des JSON-Nachweises prüfen.
+
+Vor der ersten Entscheidung lässt sich ein Vorgang bearbeiten. Geänderte Angaben erzeugen neue Einladungen, damit frühere Links keine Entscheidungen auf Grundlage veralteter Informationen zulassen. Eine offene oder abgelaufene Einladung kann einzeln erneuert werden. Hat eine teilnehmende Person anderweitig widerrufen, kann die zuständige Stelle dies bei der ausgewählten Person erfassen. Im Nachweis steht dann **Am Arbeitsplatz erfasst**. Bei eingerichtetem Mobilzugang kann die Stelle den persönlichen Widerrufslink auch erneut bereitstellen.
+
+Ein Wechsel von der portablen Ausgabe zur Installation im selben Windows-Konto übernimmt die vorhandenen Vorgänge. Die Deinstallation entfernt Programm, Verknüpfungen und heruntergeladene Updates. Vorgänge und verschlüsselter Schlüssel bleiben für eine spätere Installation im Windows-Profil erhalten.
 
 ## Einwilligungsportal einrichten
 
@@ -16,7 +20,7 @@ Dokju ist eine Windows-Desktopanwendung für die Verwaltung digitaler Einwilligu
 
 1. Den Proxy so einrichten, dass er nur `/i/` und `/w/` an `127.0.0.1:8787` weiterleitet. Den ursprünglichen `Host`-Header und den Anfragepfad beibehalten. Die URL-Pfade enthalten persönliche Links und gehören weder in Zugriffsprotokolle noch in einen gemeinsam genutzten Cache.
 2. Unter **Verbindung** die HTTPS-Adresse ohne Pfad und gegebenenfalls den abweichenden lokalen Port eintragen. Die Adresse muss für die Teilnehmenden erreichbar sein und darf für den QR-Code höchstens 71 Zeichen lang sein.
-3. Dieselbe Portaladresse für ausgegebene Links beibehalten. Nach der Umstellung von unverschlüsseltem WLAN offene Einladungen über die HTTPS-Adresse erneut teilen. Für bereits erteilte Einwilligungen muss die Stelle einen erreichbaren Widerrufsweg mitteilen. Das gilt auch bei geschlossener Anwendung oder verlorenem Link.
+3. Dieselbe Portaladresse für ausgegebene Links beibehalten. Nach der Umstellung von einer früheren Adresse offene Einladungen erneut teilen und bestehende Widerrufslinks für die betreffende Person bei Bedarf neu bereitstellen.
 
 Der Portaldienst läuft, solange Dokju geöffnet ist. Das aktuelle Release ist für den Betrieb an einem einzelnen Arbeitsplatz ausgelegt. Die Voraussetzungen für den Einsatz in einer Organisation stehen unter **Produktivbetrieb**.
 
@@ -24,7 +28,7 @@ Der Portaldienst läuft, solange Dokju geöffnet ist. Das aktuelle Release ist f
 
 **Updates** zeigt die installierte Buildnummer, den Commit und verfügbare Versionen. Dokju sucht kurz nach dem Start, alle sechs Stunden und auf Wunsch manuell nach Updates. Nach Klick auf **Installieren und neu starten** lädt Dokju das Paket, prüft es und startet neu. Bei einem Startfehler öffnet der Starter die vorherige Version. Bei einem Netzfehler bleibt der Arbeitsbereich benutzbar.
 
-Der Workflow in `.github/workflows/windows-release.yml` prüft Pull Requests und Pushes auf `main`. Bei einem erfolgreichen Push veröffentlicht er `Dokju.zip` für den letzten Commit des Pushes. Reihenfolge und Commit-ID stehen im Release-Tag und im Paket. Der Updater wählt aus den 30 zuletzt gelisteten Releases den höchsten passenden Build und prüft dessen SHA-256-Wert vor dem Entpacken.
+Der Workflow in `.github/workflows/windows-release.yml` prüft Pull Requests und Pushes auf `main`. Bei einem erfolgreichen Push veröffentlicht er den Installer und das Update-Paket für den letzten Commit des Pushes. Reihenfolge und Commit-ID stehen im Release-Tag und im Paket. Der Updater wählt aus den 30 zuletzt gelisteten Releases den höchsten passenden Build und prüft dessen SHA-256-Wert vor dem Entpacken.
 
 1. Den Inhalt des Ordners `Dokju` als Wurzel eines öffentlichen GitHub-Repositories verwenden, `main` als Standardbranch setzen und GitHub Actions aktivieren.
 2. Auf `main` pushen und die Jobs in **Actions** prüfen. Nach der Veröffentlichung lädt und startet die Pipeline das öffentliche Paket mit demselben Updater wie die Desktop-App. Der Build kennt sein Repository aus den Release-Metadaten.
@@ -67,7 +71,7 @@ Eine Jahreslizenz pro Organisation ist eine mögliche Abrechnungsform. Die zust�
 ## Produktivbetrieb
 
 - **Rechtsgrundlage und Einwilligung klären.** Die zuständige Stelle prüft Freiwilligkeit, einen gleichwertigen Ablauf ohne Aufnahme und vollständige Datenschutzinformationen zum konkreten Verfahren. Je nach Einsatz sind besondere Datenkategorien, Minderjährige und die Rollen der beteiligten Anbieter gesondert zu betrachten.
-- **Widerruf jederzeit ermöglichen.** Ein dauerhaft erreichbarer Dienst, Wiederzugang bei verlorenem Link und ein Weg zur Durchsetzung beim KI-Anbieter fehlen. Dokju aktualisiert seinen eigenen Status. Den Stopp der Aufnahme und den weiteren Umgang mit den Daten muss der Prozess beim KI-Anbieter sicherstellen.
+- **Widerruf jederzeit ermöglichen.** Ein durchgängig erreichbares Portal und ein vereinbarter Weg zur Durchsetzung beim KI-Anbieter sind für einen organisationsweiten Einsatz erforderlich. Dokju aktualisiert seinen eigenen Status. Den Stopp der Aufnahme und den weiteren Umgang mit den Daten muss der Prozess beim KI-Anbieter sicherstellen.
 - **Nachweis und IT-Betrieb absichern.** Die Stelle legt die Zuordnung zur teilnehmenden Person, Rollen und Zugriff, Fristen, Ablage und den Umgang mit exportierten Kopien fest. Für den laufenden Betrieb braucht sie eine erprobte Sicherung und Wiederherstellung einschließlich des Schlüssels, sowie einen Prozess für Störungen und Sicherheitsupdates.
 - **Barrierefreiheit abnehmen.** Die zuständige Stelle prüft Portal und Desktopanwendung gegen die für sie geltenden Anforderungen. Die Sprachfassung in einfachem Deutsch kann dabei mit den Zielgruppen geprüft werden.
 

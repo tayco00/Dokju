@@ -118,9 +118,7 @@
     <Border Grid.Column="0" Background="#152337">
       <DockPanel x:Name="SidebarPanel" LastChildFill="False" Margin="16,25,16,18">
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="3,0,0,32">
-          <Border Background="#BEE9DC" Width="38" Height="38" CornerRadius="11">
-            <Path Data="M 1,7 L 6,12 L 16,1" Stroke="#11574E" StrokeThickness="2.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-          </Border>
+          <Image x:Name="BrandLogo" Width="38" Height="38" RenderOptions.BitmapScalingMode="HighQuality"/>
           <TextBlock Text="Dokju" FontSize="27" FontWeight="SemiBold" Foreground="#FFFFFF" Margin="10,0,0,1"/>
         </StackPanel>
         <Button x:Name="ConnectionButton" DockPanel.Dock="Top" Style="{StaticResource SidebarButton}" Content="Verbindung"/>
@@ -135,7 +133,7 @@
       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
       <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,16">
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-          <Button x:Name="NewButton" Style="{StaticResource Primary}" Content="+  Neuer Vorgang"/>
+          <Button x:Name="NewButton" Style="{StaticResource Primary}" Content="+  Neuer Vorgang" ToolTip="Neuer Vorgang (Strg+N)"/>
         </StackPanel>
         <StackPanel>
           <TextBlock Text="Einwilligungen" FontSize="36" FontWeight="SemiBold"/>
@@ -153,7 +151,7 @@
         <Border Grid.Column="1" Style="{StaticResource Card}" Padding="14,8" Margin="0,0,8,0">
           <DockPanel LastChildFill="True">
             <TextBlock x:Name="OpenCount" Text="0" FontSize="24" FontWeight="SemiBold" DockPanel.Dock="Right"/>
-            <TextBlock Text="Offene QR-Codes" Foreground="#53667A"/>
+            <TextBlock Text="Offene Einladungen" Foreground="#53667A"/>
           </DockPanel>
         </Border>
         <Border Grid.Column="2" Style="{StaticResource Card}" Padding="14,8">
@@ -208,13 +206,16 @@
               <Border Background="#E4F3EE" Width="58" Height="58" CornerRadius="15" Margin="0,0,0,12">
                 <Path Data="M 1,8 L 8,15 L 22,1" Stroke="#08665D" StrokeThickness="3" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center"/>
               </Border>
-              <TextBlock Text="Einwilligung erfassen" FontSize="22" FontWeight="SemiBold" HorizontalAlignment="Center"/>
-              <TextBlock Text="Wählen Sie einen Vorgang aus oder legen Sie einen neuen an." TextWrapping="Wrap" TextAlignment="Center" Foreground="#53667A" Margin="0,5,0,0"/>
+              <TextBlock x:Name="EmptyTitle" FontSize="22" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+              <TextBlock x:Name="EmptyHint" MaxWidth="310" TextWrapping="Wrap" TextAlignment="Center" Foreground="#53667A" Margin="0,5,0,0"/>
+              <Button x:Name="FirstCaseButton" Content="Vorgang anlegen" Style="{StaticResource Primary}" HorizontalAlignment="Center" Margin="0,17,0,0"/>
             </StackPanel>
             <ScrollViewer x:Name="Detail" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
               <StackPanel x:Name="DetailPane" Margin="23,19,22,20">
                 <DockPanel LastChildFill="True">
-                  <Button x:Name="ExportButton" DockPanel.Dock="Right" Content="Nachweis exportieren" AutomationProperties.Name="Nachweis exportieren" VerticalAlignment="Top" Margin="7,0,0,0"/>
+                  <StackPanel DockPanel.Dock="Right" VerticalAlignment="Top" Margin="7,0,0,0">
+                    <Button x:Name="ExportButton" Content="Nachweis exportieren" AutomationProperties.Name="Nachweis exportieren"/>
+                  </StackPanel>
                   <StackPanel>
                     <TextBlock x:Name="DetailTitle" FontSize="26" FontWeight="SemiBold" TextWrapping="Wrap"/>
                     <TextBlock x:Name="DetailReference" Foreground="#53667A" TextWrapping="Wrap" Margin="0,3,0,0"/>
@@ -231,7 +232,11 @@
                   <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Summary}"/></DataTemplate></ComboBox.ItemTemplate>
                 </ComboBox>
                 <DockPanel Margin="0,5,0,0">
-                  <Button x:Name="RenewButton" DockPanel.Dock="Right" Content="Neuen QR-Code erstellen" Visibility="Collapsed" Margin="4,0,0,0"/>
+                  <StackPanel DockPanel.Dock="Right" Margin="4,0,0,0">
+                    <Button x:Name="RenewButton" Content="Einladung erneuern" AutomationProperties.Name="Einladung erneuern" Visibility="Collapsed"/>
+                    <Button x:Name="WithdrawButton" Content="Widerruf erfassen" Visibility="Collapsed"/>
+                    <Button x:Name="WithdrawalLinkButton" Content="Widerrufslink kopieren" Visibility="Collapsed" Margin="0,5,0,0"/>
+                  </StackPanel>
                   <TextBlock x:Name="PersonTime" Foreground="#53667A" FontSize="12" TextWrapping="Wrap"/>
                 </DockPanel>
                 <Border x:Name="QrCard" Background="#EDF4F6" CornerRadius="12" BorderBrush="#D7E5E9" BorderThickness="1" Padding="13" Margin="0,12,0,0">
@@ -249,6 +254,10 @@
                     </StackPanel>
                   </Grid>
                 </Border>
+                <WrapPanel Margin="0,9,0,0">
+                  <Button x:Name="EditButton" Content="Vorgang bearbeiten" Margin="0,0,7,4"/>
+                  <Button x:Name="MobileButton" Content="Mobilzugang einrichten" Margin="0,0,0,4"/>
+                </WrapPanel>
                 <TextBlock x:Name="RetentionText" Foreground="#53667A" TextWrapping="Wrap" FontSize="12" Margin="0,11,0,0"/>
               </StackPanel>
             </ScrollViewer>

@@ -14,7 +14,7 @@ dl{margin:18px 0;display:grid;grid-template-columns:minmax(105px,1fr) 1.35fr;gap
 dt{font-weight:650;overflow-wrap:anywhere}dd{margin:0;overflow-wrap:anywhere}form{margin:20px 0 8px}.buttons{display:flex;flex-wrap:wrap;gap:10px}
 @media(max-width:430px){dl{grid-template-columns:minmax(0,1fr);gap:2px}dt{color:#43596d;font-size:13px}dd{margin-bottom:8px}dd:last-child{margin-bottom:0}}
 button,.button{font:inherit;font-weight:680;min-height:45px;border-radius:9px;padding:9px 14px;border:1px solid #08665d;background:#08665d;color:white;cursor:pointer;text-decoration:none;display:inline-block}
-button.secondary{background:white;color:#23374c;border-color:#8597aa}button:hover,.button:hover{filter:brightness(.93)}
+button.choice{background:white;color:#23374c;border-color:#8597aa;flex:1 1 145px}button:hover,.button:hover{filter:brightness(.93)}
 small{color:#53667a;display:block;margin-top:16px}a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #a85c13;outline-offset:3px}
 input[type=text]{width:100%;font:inherit;font-size:14px;padding:10px;border:1px solid #8597aa;border-radius:8px;margin:5px 0 14px}
 .result{border-left:4px solid #08665d;padding-left:14px}
@@ -39,9 +39,9 @@ function formatTime(value, language) {
   }).format(new Date(value)) + ' (Berlin)';
 }
 
-function choices(copy, language, claim, buttons) {
-  return `<form method="post"><input type="hidden" name="lang" value="${language}"><input type="hidden" name="claim" value="${claim}"><div class="buttons">${buttons.map(([action, label, secondary]) =>
-    `<button type="submit" name="action" value="${action}"${secondary ? ' class="secondary"' : ''}>${label}</button>`
+function choices(language, claim, buttons) {
+  return `<form method="post"><input type="hidden" name="lang" value="${language}"><input type="hidden" name="claim" value="${claim}"><div class="buttons">${buttons.map(([action, label]) =>
+    `<button type="submit" name="action" value="${action}"${buttons.length > 1 ? ' class="choice"' : ''}>${label}</button>`
   ).join('')}</div></form>`;
 }
 
@@ -116,7 +116,7 @@ export async function portal(request, response, store, origin, readBody) {
   }
   if (withdrawal) {
     return sendHtml(response, 200, page(language, copy.withdrawTitle,
-      `<h1>${copy.withdrawTitle}</h1>${context}<p>${copy.withdrawText}</p>${choices(copy, language, claim, [['withdrawn', copy.withdraw]])}`));
+      `<h1>${copy.withdrawTitle}</h1>${context}<p>${copy.withdrawText}</p>${choices(language, claim, [['withdrawn', copy.withdraw]])}`));
   }
   if (status === 'accepted') {
     const link = `${origin}/w/${store.token(invite, 'withdraw')}?lang=${language}`;
@@ -130,6 +130,6 @@ export async function portal(request, response, store, origin, readBody) {
     <dl>${info.map(([label, value]) => `<dt>${label}</dt><dd>${escape(value)}</dd>`).join('')}</dl>
     <h2>${copy.storage}</h2><p>${notice.retention}</p><h2>${copy.rights}</h2><p>${notice.rights}</p>
     <h2>${copy.decision}</h2><p>${notice.choice}</p>
-    ${choices(copy, language, claim, [['declined', copy.no, true], ['accepted', copy.yes]])}
+    ${choices(language, claim, [['declined', copy.no], ['accepted', copy.yes]])}
     <small>${copy.until}: ${formatTime(invite.until ?? item.inviteUntil, language)}</small>`));
 }

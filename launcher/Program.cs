@@ -21,6 +21,16 @@ namespace Dokju
             if (File.Exists(Path.Combine(packaged, Installation.Desktop))) current = packaged;
             try
             {
+                if (args.Length == 2 && args[0] == "--smoke")
+                {
+                    var checkDirectory = Path.GetFullPath(args[1]);
+                    using (var check = Installation.Launch(Path.Combine(current, Installation.Desktop), "--smoke \"" + checkDirectory + "\""))
+                    {
+                        if (check.WaitForExit(30000)) return check.ExitCode;
+                        check.Kill();
+                        return 1;
+                    }
+                }
                 Directory.CreateDirectory(root);
                 using (var mutex = new Mutex(false, @"Local\Dokju-Launcher"))
                 {

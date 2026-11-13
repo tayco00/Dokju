@@ -30,6 +30,24 @@ function days(value, max, name) {
   return value;
 }
 
+function caseInput(values) {
+  const count = values.count;
+  if (!Number.isInteger(count) || count < 1 || count > 12)
+    throw new RuleError('Bitte 1 bis 12 Teilnehmende angeben.');
+  return {
+    count,
+    title: label(values.title, 90, 'Gesprächsbezeichnung'),
+    reference: label(values.reference, 64, 'Aktenzeichen'),
+    info: {
+      controller: label(values.controller, 100, 'Verantwortliche Stelle'),
+      provider: label(values.provider, 100, 'KI-Anbieter'),
+      contact: label(values.contact, 110, 'Datenschutzkontakt'),
+      audioDays: days(values.audioDays, 365, 'Aufbewahrung der Aufnahme'),
+      proofDays: days(values.proofDays, 3650, 'Aufbewahrung des Nachweises'),
+    },
+  };
+}
+
 const day = 86_400_000;
 const auditVersion = 'dokju-evidence-v1';
 const documentVersion = 'dokju-evidence-v2';
@@ -110,20 +128,11 @@ export class Store {
 
   create(values) {
     const now = this.clock();
-    const info = {
-      controller: label(values.controller, 100, 'Verantwortliche Stelle'),
-      provider: label(values.provider, 100, 'KI-Anbieter'),
-      contact: label(values.contact, 110, 'Datenschutzkontakt'),
-      audioDays: days(values.audioDays, 365, 'Aufbewahrung der Aufnahme'),
-      proofDays: days(values.proofDays, 3650, 'Aufbewahrung des Nachweises'),
-    };
-    const count = values.count;
-    if (!Number.isInteger(count) || count < 1 || count > 12)
-      throw new RuleError('Bitte 1 bis 12 Teilnehmende angeben.');
+    const { count, title, reference, info } = caseInput(values);
     const item = {
       id: randomUUID(),
-      title: label(values.title, 90, 'Gesprächsbezeichnung'),
-      reference: label(values.reference, 64, 'Aktenzeichen'),
+      title,
+      reference,
       created: new Date(now).toISOString(),
       inviteUntil: new Date(now + invitationPeriod).toISOString(),
       proofUntil: new Date(now + info.proofDays * day).toISOString(),
@@ -131,8 +140,33 @@ export class Store {
       notices: notices(info),
       invites: Array.from({ length: count }, (_, index) => ({ id: randomUUID(), number: index + 1, events: [] })),
     };
-    this.commit(next => next.cases.push(item));
+    this.commit(next => {
+      next.cases.push(item);
+      if (values.remember === true) next.defaults = info;
+    });
     return this.view(item);
+  }
+
+  edit(id, values) {
+    const item = this.lookup(id);
+    if (item.invites.some(invite => invite.events.length))
+      throw new RuleError('Der Vorgang enthält bereits eine Entscheidung. Die Angaben bleiben als Nachweis erhalten.', 409);
+    const { count, title, reference, info } = caseInput(values);
+    if (count === item.invites.length && title === item.title && reference === item.reference && canonical(info) === canonical(item.info))
+      return { changed: false, item: this.view(item) };
+    const now = this.clock();
+    const proofUntil = Date.parse(item.created) + info.proofDays * day;
+    if (proofUntil <= now)
+      throw new RuleError('Die Frist endet vor dem aktuellen Zeitpunkt. Bitte die Aufbewahrungsdauer prüfen.');
+    this.commit(next => {
+      const target = next.cases.find(entry => entry.id === id);
+      Object.assign(target, {
+        title, reference, info, notices: notices(info), proofUntil: new Date(proofUntil).toISOString(),
+        inviteUntil: new Date(Math.min(now + invitationPeriod, proofUntil)).toISOString(),
+        invites: Array.from({ length: count }, (_, index) => ({ id: randomUUID(), number: index + 1, events: [] })),
+      });
+    });
+    return { changed: true, item: this.view(this.lookup(id)) };
   }
 
   status(item, invite, now = this.clock()) {
@@ -149,6 +183,7 @@ export class Store {
     return {
       id: item.id, title: item.title, reference: item.reference, created: item.created,
       inviteUntil: item.inviteUntil, proofUntil: item.proofUntil, info: item.info, invites,
+      editable: item.invites.every(invite => invite.events.length === 0),
       ready: invites.every(invite => invite.status === 'accepted'),
     };
   }
@@ -179,7 +214,16 @@ export class Store {
     return this.view(this.lookup(id));
   }
 
-  record(match, kind, language, claim) {
+  withdraw(id, person) {
+    const item = this.lookup(id);
+    const invite = item.invites.find(entry => entry.number === person);
+    if (!invite || !['accepted', 'withdrawn'].includes(this.status(item, invite)))
+      throw new RuleError('Für diese Person liegt keine Einwilligung zum Widerruf vor.', 409);
+    this.record({ item, invite }, 'withdrawn', null, null, 'workspace');
+    return this.view(this.lookup(id));
+  }
+
+  record(match, kind, language, claim, source) {
     const { item, invite } = match;
     if (kind === 'withdrawn' && this.status(item, invite) === 'withdrawn') return;
     const expected = kind === 'withdrawn' ? 'accepted' : 'pending';
@@ -188,6 +232,7 @@ export class Store {
       kind, at: new Date(this.clock()).toISOString(), language,
       previous: invite.events.at(-1)?.seal ?? null,
     };
+    if (source) event.source = source;
     event.seal = this.mac(JSON.stringify([auditVersion, item.id, item.reference, item.notices, invite.id, event]));
     this.commit(next => {
       const target = next.cases.find(entry => entry.id === item.id).invites.find(entry => entry.id === invite.id);

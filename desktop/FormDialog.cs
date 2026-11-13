@@ -1,6 +1,7 @@
 using System;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Automation;
 using System.Windows.Media;
 
 namespace Dokju
@@ -51,10 +52,40 @@ namespace Dokju
 
         private void AddField(string name, Control control)
         {
+            AutomationProperties.SetName(control, name);
             fields.Children.Add(new Label { Content = name, Target = control, Padding = new Thickness(0, 0, 0, 3), FontWeight = FontWeights.SemiBold });
             control.Margin = new Thickness(0, 0, 5, 8);
             fields.Children.Add(control);
             if (first == null) first = control;
+        }
+
+        public void Section(string title)
+        {
+            fields.Children.Add(new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 9, 0, 6) });
+        }
+
+        public CheckBox Check(string label, bool selected)
+        {
+            var control = new CheckBox { Content = label, IsChecked = selected, Margin = new Thickness(0, 5, 0, 8) };
+            fields.Children.Add(control);
+            return control;
+        }
+
+        public static string Required(TextBox field, string message)
+        {
+            var value = field.Text.Trim();
+            if (value.Length != 0) return value;
+            field.Focus();
+            throw new ArgumentException(message);
+        }
+
+        public static int InRange(TextBox field, int minimum, int maximum, string message)
+        {
+            int value;
+            if (Int32.TryParse(field.Text, out value) && value >= minimum && value <= maximum) return value;
+            field.Focus();
+            field.SelectAll();
+            throw new ArgumentException(message);
         }
 
         public TextBox Field(string name, string value, int limit)
