@@ -125,6 +125,9 @@
         <Button x:Name="ConnectionButton" DockPanel.Dock="Top" Style="{StaticResource SidebarButton}" Content="Verbindung"/>
         <Button x:Name="VerifyButton" DockPanel.Dock="Top" Style="{StaticResource SidebarButton}" Content="Nachweis prüfen"/>
         <Button x:Name="UpdateButton" DockPanel.Dock="Top" Style="{StaticResource SidebarButton}" Content="Updates"/>
+        <TextBlock x:Name="UpdateStatus" DockPanel.Dock="Top" Visibility="Collapsed"
+                   Foreground="#D5E2ED" FontSize="12" TextWrapping="Wrap" Margin="8,0,8,10"
+                   AutomationProperties.LiveSetting="Polite"/>
         <StackPanel DockPanel.Dock="Bottom">
           <TextBlock x:Name="ConnectionText" Text="Startet …" Foreground="#C1D0DF" TextWrapping="Wrap" FontSize="12" Margin="2,0,0,0"/>
         </StackPanel>

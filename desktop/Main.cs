@@ -146,7 +146,8 @@ namespace Dokju
             timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
             timer.Tick += (sender, args) => PollStatus();
             timer.Start();
-            updates = new UpdatePanel(Window, Button("UpdateButton"), directory, smoke && !liveSmoke ? new GitHubUpdates(new System.Net.Http.HttpClient(new StartupUpdateFixture())) : null);
+            var updateClient = smoke && !liveSmoke ? new GitHubUpdates(new System.Net.Http.HttpClient(new StartupUpdateFixture())) : null;
+            updates = new UpdatePanel(Window, Button("UpdateButton"), Label("UpdateStatus"), directory, updateClient);
         }
 
         private void PollStatus()
@@ -657,8 +658,12 @@ namespace Dokju
                 {
                     var check = updates.StartupCheck;
                     if (check == null) throw new IOException("Die Updateprüfung wurde beim Öffnen nicht ausgelöst.");
+                    var updateStatus = Label("UpdateStatus");
+                    if (!updateStatus.IsVisible || updateStatus.Text != "Prüfe auf vorhandene Updates ...")
+                        throw new IOException("Die laufende Updateprüfung ist beim Öffnen nicht sichtbar.");
                     await check;
                     if (!updates.LastCheckSucceeded) throw new IOException(updates.CheckMessage);
+                    if (updateStatus.IsVisible) throw new IOException("Die Updateprüfung wird weiterhin als laufend angezeigt.");
                     if (!liveUpdate && !Equals(Button("UpdateButton").Content, "Update verfügbar")) throw new IOException("Das Update wurde beim Öffnen nicht angezeigt.");
                     var item = backend.Post<CaseRow>("/cases", new
                     {

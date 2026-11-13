@@ -18,8 +18,10 @@ namespace Dokju
     internal sealed class UpdatePanel : IDisposable
     {
         private const string OfficialRepository = "tayco00/Dokju";
+        private const string CheckingMessage = "Prüfe auf vorhandene Updates ...";
         private readonly Window owner;
         private readonly Button entry;
+        private readonly TextBlock startupStatus;
         private readonly string root;
         private readonly BuildIdentity build;
         private readonly DispatcherTimer timer;
@@ -34,10 +36,11 @@ namespace Dokju
         private string checkMessage = "Noch nicht geprüft.";
         private event Action StateChanged;
 
-        internal UpdatePanel(Window owner, Button entry, string data, GitHubUpdates client = null)
+        internal UpdatePanel(Window owner, Button entry, TextBlock startupStatus, string data, GitHubUpdates client = null)
         {
             this.owner = owner;
             this.entry = entry;
+            this.startupStatus = startupStatus;
             this.client = client ?? new GitHubUpdates();
             root = Installation.Root(data);
             build = BuildIdentity.Read(AppDomain.CurrentDomain.BaseDirectory);
@@ -74,15 +77,18 @@ namespace Dokju
         {
             checking = true;
             LastCheckSucceeded = false;
-            checkMessage = "Dokju sucht nach Updates …";
-            entry.Content = "Prüfe Updates …";
+            checkMessage = CheckingMessage;
+            startupStatus.Text = CheckingMessage;
+            startupStatus.Visibility = Visibility.Visible;
             NotifyState();
+            var cancellation = lifetime.Token;
+            // Keep the status legible even when GitHub responds before the first repaint.
+            var minimumDisplay = Task.Delay(1000, cancellation);
             try
             {
                 var state = Installation.Versions(root);
                 var baseline = Math.Max(build.sequence, Installation.ActiveSequence(root, state, source));
-                offer = await client.Check(source, baseline, state.rejected, lifetime.Token);
-                checkMessage = offer == null ? "Dokju ist auf dem neuesten verfügbaren Stand." : "Verfügbar · " + offer.Caption;
+                offer = await client.Check(source, baseline, state.rejected, cancellation);
                 LastCheckSucceeded = true;
             }
             catch (Exception error)
@@ -90,14 +96,16 @@ namespace Dokju
                 offer = null;
                 checkMessage = ErrorText(error);
             }
-            finally
+            try { await minimumDisplay; }
+            catch (OperationCanceledException) { }
+            checking = false;
+            if (!disposed)
             {
-                checking = false;
-                if (!disposed)
-                {
-                    entry.Content = offer == null ? "Updates" : "Update verfügbar";
-                    NotifyState();
-                }
+                if (LastCheckSucceeded)
+                    checkMessage = offer == null ? "Dokju ist auf dem neuesten verfügbaren Stand." : "Verfügbar · " + offer.Caption;
+                entry.Content = offer == null ? "Updates" : "Update verfügbar";
+                startupStatus.Visibility = Visibility.Collapsed;
+                NotifyState();
             }
         }
 
@@ -167,7 +175,7 @@ namespace Dokju
                 check.IsEnabled = field.IsEnabled = !checking;
                 install.IsEnabled = !checking && matching;
                 status.Text = !String.Equals(field.Text.Trim(), repository, StringComparison.OrdinalIgnoreCase) ?
-                    "Wählen Sie Jetzt prüfen, um dieses Repository zu verwenden." : checkMessage;
+                    "Wählen Sie Jetzt prüfen, um dieses Repository zu verwenden." : checking ? CheckingMessage : checkMessage;
             };
             showState();
             StateChanged += showState;
