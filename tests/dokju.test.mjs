@@ -167,6 +167,16 @@ test('Desktop and citizen flow survives a restart, preserves exact notices and r
   const pdf = Buffer.from(exported.pdf, 'base64');
   const pdfHash = createHash('sha256').update(pdf).digest('hex');
   assert.equal(pdf.subarray(0, 8).toString(), '%PDF-1.7');
+  const prefix = Buffer.from('%PDF-1.7\n%Dokju-PDF-1 ');
+  assert.deepEqual(pdf.subarray(0, prefix.length), prefix);
+  const seal = pdf.subarray(prefix.length, prefix.length + 43).toString('ascii');
+  const normalized = Buffer.from(pdf);
+  normalized.fill(0x30, prefix.length, prefix.length + 43);
+  const digest = createHash('sha256').update(normalized).digest('hex');
+  assert.deepEqual((await app.request('/verify-pdf', { digest, seal })).value, { valid: true });
+  assert.deepEqual((await app.request('/verify-pdf', { digest: pdfHash, seal })).value, { valid: false });
+  assert.equal((await app.request('/verify-pdf', { digest, seal: exported.proof.seal })).value.valid, false);
+  assert.equal(new Store(temporary(t), randomBytes(32)).verifyPdf(digest, seal).valid, false);
   assert.equal((await app.request('/verify', exported.proof)).value.valid, true);
   assert.deepEqual((await app.request('/verify', { proof: exported.proof, pdfHash })).value, { valid: true, document: true });
   assert.deepEqual((await app.request('/verify', { proof: exported.proof, pdfHash: 'f'.repeat(64) })).value, { valid: true, document: false });

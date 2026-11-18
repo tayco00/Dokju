@@ -267,6 +267,14 @@ export class Store {
     return { ...proof, document: { sha256, seal: this.mac(`pdf:${proof.seal}:${sha256}`) } };
   }
 
+  pdfSeal(digest) {
+    return this.mac('dokju-standalone-pdf-v1:' + digest);
+  }
+
+  verifyPdf(digest, seal) {
+    return { valid: typeof digest === 'string' && /^[a-f0-9]{64}$/.test(digest) && equal(seal, this.pdfSeal(digest)) };
+  }
+
   verify(proof, pdfHash) {
     const schema = proof?.evidence?.schema;
     if (![auditVersion, documentVersion].includes(schema) ||

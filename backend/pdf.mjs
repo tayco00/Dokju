@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
 
@@ -66,7 +67,7 @@ function readFont(file) {
 
 const hex = id => id.toString(16).padStart(4, '0');
 
-export function proofPdf({ evidence, seal }, fontFile = join(process.env.WINDIR ?? 'C:\\Windows', 'Fonts', 'segoeui.ttf')) {
+export function proofPdf({ evidence, seal }, sealDigest, fontFile = join(process.env.WINDIR ?? 'C:\\Windows', 'Fonts', 'segoeui.ttf')) {
   const { font, glyph, width, bbox, ascent, descent } = readFont(fontFile);
   const characters = new Map();
   const pages = [];
@@ -159,7 +160,7 @@ export function proofPdf({ evidence, seal }, fontFile = join(process.env.WINDIR 
     y -= 6;
   }
   section('Integrität');
-  block('Der ZIP-Export verknüpft dieses PDF mit dem JSON-Nachweis. Beide Dateien können in derselben Dokju-Installation gemeinsam geprüft werden.');
+  block('Wählen Sie dieses PDF in Dokju unter „Nachweis prüfen“ aus. Verwenden Sie dafür den Arbeitsplatz oder Server, auf dem es erstellt wurde. Geprüft wird der Stand beim Export.');
   block(`Prüfwert: ${seal}`);
   pages.push(page);
 
@@ -199,7 +200,9 @@ export function proofPdf({ evidence, seal }, fontFile = join(process.env.WINDIR 
     return add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F0 ${fontId} 0 R >> >> /Contents ${contents} 0 R >>`);
   });
   objects[2] = `<< /Type /Pages /Kids [${kids.map(id => `${id} 0 R`).join(' ')}] /Count ${kids.length} >>`;
-  const chunks = [Buffer.from('%PDF-1.7\n%\xe2\xe3\xcf\xd3\n', 'latin1')];
+  // V1 hashes every byte with the 43-byte seal field set to ASCII zeroes.
+  const prefix = '%PDF-1.7\n%Dokju-PDF-1 ';
+  const chunks = [Buffer.from(prefix + '0'.repeat(43) + '\n%\xe2\xe3\xcf\xd3\n', 'latin1')];
   const offsets = [0];
   let position = chunks[0].length;
   for (let id = 1; id < objects.length; id++) {
@@ -210,5 +213,8 @@ export function proofPdf({ evidence, seal }, fontFile = join(process.env.WINDIR 
   }
   const entries = offsets.slice(1).map(value => `${String(value).padStart(10, '0')} 00000 n \n`);
   chunks.push(Buffer.from(`xref\n0 ${objects.length}\n0000000000 65535 f \n${entries.join('')}trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${position}\n%%EOF\n`));
-  return Buffer.concat(chunks);
+  const pdf = Buffer.concat(chunks);
+  const digest = createHash('sha256').update(pdf).digest('hex');
+  pdf.write(sealDigest(digest), prefix.length, 43, 'ascii');
+  return pdf;
 }

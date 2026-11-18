@@ -583,7 +583,7 @@ namespace Dokju
             var dialog = new SaveFileDialog
             {
                 Title = "Einwilligungsnachweis exportieren", FileName = "Dokju-" + name,
-                Filter = "PDF für die Akte (*.pdf)|*.pdf|ZIP mit PDF und prüfbarem JSON (*.zip)|*.zip", AddExtension = true
+                Filter = "Prüfbares PDF für die Akte (*.pdf)|*.pdf|ZIP mit PDF und JSON (*.zip)|*.zip", AddExtension = true
             };
             if (dialog.ShowDialog(Window) != true) return;
             var result = backend.Get<ExportResult>("/cases/" + item.id + "/export");
@@ -609,35 +609,86 @@ namespace Dokju
         {
             var dialog = new OpenFileDialog
             {
-                Title = "JSON-Nachweis oder ZIP auswählen", Filter = "Dokju-Nachweis (*.json;*.zip)|*.json;*.zip"
+                Title = "Nachweis zur Prüfung auswählen", Filter = "Dokju-Nachweise (*.pdf;*.zip;*.json)|*.pdf;*.zip;*.json"
             };
             if (dialog.ShowDialog(Window) != true) return;
             const int maximum = 120000;
             string data;
             string pdfHash = null;
-            if (Path.GetExtension(dialog.FileName).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+            string file = dialog.FileName;
+            var extension = Path.GetExtension(file).ToLowerInvariant();
+            if (extension == ".pdf")
             {
-                using (var stream = File.OpenRead(dialog.FileName))
+                var verified = VerifyPdf(file, out pdfHash);
+                if (verified != null)
+                {
+                    MessageBox.Show(Window, verified.valid ? "Das PDF entspricht dem unveränderten Export dieses Arbeitsplatzes." :
+                        "Das PDF konnte hier nicht bestätigt werden. Es wurde verändert oder stammt von einem anderen Arbeitsplatz oder Server.",
+                        "Nachweis prüfen", MessageBoxButton.OK, verified.valid ? MessageBoxImage.Information : MessageBoxImage.Warning);
+                    return;
+                }
+                if (MessageBox.Show(Window, "Dieses PDF enthält keinen erkennbaren Dokju-Prüfwert für die gesamte Datei. " +
+                    "Bei älteren Exporten ist ein Vergleich mit der JSON-Datei aus demselben Export möglich. Möchten Sie diese auswählen?",
+                    "PDF allein nicht prüfbar", MessageBoxButton.YesNo, MessageBoxImage.Information, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+                var companion = new OpenFileDialog { Title = "JSON-Datei aus demselben Export auswählen", Filter = "Dokju-Nachweis (*.json)|*.json", InitialDirectory = Path.GetDirectoryName(file) };
+                if (companion.ShowDialog(Window) != true) return;
+                file = companion.FileName;
+            }
+            if (extension == ".zip")
+            {
+                using (var stream = File.OpenRead(file))
                 using (var zip = new ZipArchive(stream, ZipArchiveMode.Read))
                 {
                     var json = ReadEntry(zip, "Dokju-Nachweis.json", maximum);
                     var pdf = ReadEntry(zip, "Dokju-Nachweis.pdf", 8000000);
                     data = Encoding.UTF8.GetString(json);
-                    using (var hash = SHA256.Create()) pdfHash = BitConverter.ToString(hash.ComputeHash(pdf)).Replace("-", "").ToLowerInvariant();
+                    pdfHash = Sha256(pdf);
                 }
             }
             else
             {
-                if (new FileInfo(dialog.FileName).Length > maximum) throw new IOException("Der JSON-Nachweis ist zu groß.");
-                data = File.ReadAllText(dialog.FileName);
+                if (new FileInfo(file).Length > maximum) throw new IOException("Der JSON-Nachweis ist zu groß.");
+                data = File.ReadAllText(file);
             }
             var result = backend.Post<Verification>("/verify", new { proof = Backend.Json.DeserializeObject(data), pdfHash = pdfHash });
             string message = !result.valid ? "Die Prüfung des JSON-Nachweises ist fehlgeschlagen." :
                 result.document == false ? "Die PDF-Datei stimmt nicht mit dem JSON-Nachweis überein." :
-                result.document == true ? "PDF und JSON stimmen mit dem Nachweis dieser Installation überein." :
+                result.document == true ? "PDF und JSON stimmen mit dem ursprünglichen Nachweis überein." :
+                pdfHash != null ? "Der JSON-Nachweis ist gültig, enthält aber keinen Vergleichswert für dieses PDF." :
                 "Der JSON-Nachweis stimmt mit dem Prüfwert dieser Installation überein.";
             MessageBox.Show(Window, message, "Nachweis prüfen", MessageBoxButton.OK,
-                result.valid && result.document != false ? MessageBoxImage.Information : MessageBoxImage.Warning);
+                result.valid && (pdfHash == null || result.document == true) ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+
+        private static string Sha256(byte[] bytes)
+        {
+            using (var hash = SHA256.Create()) return BitConverter.ToString(hash.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant();
+        }
+
+        private Verification VerifyPdf(string file, out string legacyHash)
+        {
+            legacyHash = null;
+            byte[] pdf;
+            using (var input = new BinaryReader(File.OpenRead(file)))
+            {
+                var length = input.BaseStream.Length;
+                if (length <= 0 || length > 8000000) throw new IOException("Bitte ein Dokju-PDF mit maximal 8 MB auswählen.");
+                pdf = input.ReadBytes((int)length);
+                if (pdf.Length != length) throw new IOException("Die PDF-Datei konnte nicht vollständig gelesen werden.");
+            }
+            if (pdf.Length < 5 || Encoding.ASCII.GetString(pdf, 0, 5) != "%PDF-") throw new IOException("Die ausgewählte Datei hat keinen PDF-Dateikopf.");
+            const string prefix = "%PDF-1.7\n%Dokju-PDF-1 ";
+            const int sealSize = 43;
+            if (pdf.Length < prefix.Length || Encoding.ASCII.GetString(pdf, 0, prefix.Length) != prefix)
+            {
+                legacyHash = Sha256(pdf);
+                return null;
+            }
+            if (pdf.Length <= prefix.Length + sealSize || pdf[prefix.Length + sealSize] != '\n')
+                return new Verification { valid = false };
+            var seal = Encoding.ASCII.GetString(pdf, prefix.Length, sealSize);
+            for (int i = 0; i < sealSize; i++) pdf[prefix.Length + i] = (byte)'0';
+            return backend.Post<Verification>("/verify-pdf", new { digest = Sha256(pdf), seal = seal });
         }
 
         private static byte[] ReadEntry(ZipArchive zip, string name, int maximum)
@@ -746,7 +797,18 @@ namespace Dokju
                     if (disconnected || !backend.Available) throw new IOException("Der lokale Dienst wurde nicht neu gestartet.");
                     updates.Show(window => Capture(window, Path.Combine(directory, "updates.png")));
                     var export = backend.Get<ExportResult>("/cases/" + Selected().id + "/export");
-                    File.WriteAllBytes(Path.Combine(directory, "proof.pdf"), Convert.FromBase64String(export.pdf));
+                    var pdfPath = Path.Combine(directory, "proof.pdf");
+                    var bytes = Convert.FromBase64String(export.pdf);
+                    File.WriteAllBytes(pdfPath, bytes);
+                    string legacyHash;
+                    if (VerifyPdf(pdfPath, out legacyHash).valid != true) throw new IOException("Der PDF-Standardexport konnte nicht bestätigt werden.");
+                    var changed = Path.Combine(directory, "changed.pdf");
+                    File.WriteAllBytes(changed, bytes.Concat(new byte[] { 32 }).ToArray());
+                    if (VerifyPdf(changed, out legacyHash).valid) throw new IOException("Eine Änderung am PDF wurde übersehen.");
+                    var old = Encoding.ASCII.GetBytes("%PDF-1.7\n%Früheres Format\n%%EOF\n");
+                    File.WriteAllBytes(changed, old);
+                    if (VerifyPdf(changed, out legacyHash) != null || legacyHash != Sha256(old))
+                        throw new IOException("Ein PDF ohne eingebetteten Prüfwert wurde falsch behandelt.");
                     if (!backend.Post<Verification>("/verify", export.proof).valid) throw new IOException("Nachweisprüfung fehlgeschlagen.");
                     File.WriteAllText(Path.Combine(directory, "smoke-ok.txt"), qrLink);
                 }

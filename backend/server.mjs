@@ -92,6 +92,8 @@ export async function run(testSocket) {
       return send(201, store.create(data));
     if (method === 'POST' && url.pathname === '/verify')
       return send(200, store.verify(data.proof ?? data, data.pdfHash));
+    if (method === 'POST' && url.pathname === '/verify-pdf')
+      return send(200, store.verifyPdf(data.digest, data.seal));
     const change = /^\/cases\/([0-9a-f-]{36})\/(edit|renew|withdraw)$/.exec(url.pathname);
     if (method === 'POST' && change) {
       const [, id, action] = change;
@@ -117,7 +119,7 @@ export async function run(testSocket) {
       return send(200, { link, qr: qr(link) });
     }
     const proof = store.evidence(id);
-    const pdf = proofPdf(proof);
+    const pdf = proofPdf(proof, digest => store.pdfSeal(digest));
     return send(200, { proof: store.attachDocument(proof, pdf), pdf: pdf.toString('base64') });
   }
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
