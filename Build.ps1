@@ -25,12 +25,13 @@ $shared = Join-Path $project 'shared\Installation.cs'
 $sources = Get-ChildItem -LiteralPath (Join-Path $project 'desktop') -Filter '*.cs' -File |
     ForEach-Object FullName
 $layout = Join-Path $project 'desktop\Main.xaml'
+$startupLayout = Join-Path $project 'desktop\Startup.xaml'
 $icon = Join-Path $project 'desktop\Dokju.ico'
 $brand = Join-Path $output 'Dokju-brand.png'
 $brandSource = [IO.File]::ReadAllText((Join-Path $project 'backend\brand.mjs'))
 if ($brandSource -notmatch "\Aexport const logoPng = '([A-Za-z0-9+/=]+)';\s*\z") { throw 'Die Logo-Datei ist ungültig.' }
 [IO.File]::WriteAllBytes($brand, [Convert]::FromBase64String($Matches[1]))
-& $compiler /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 "/out:$exe" "/win32icon:$icon" "/resource:$layout,Dokju.Main.xaml" "/resource:$brand,Dokju.Logo.png" @references $shared @sources
+& $compiler /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 "/out:$exe" "/win32icon:$icon" "/resource:$layout,Dokju.Main.xaml" "/resource:$startupLayout,Dokju.Startup.xaml" "/resource:$brand,Dokju.Logo.png" @references $shared @sources
 if ($LASTEXITCODE -ne 0) { throw 'Kompilierung fehlgeschlagen.' }
 & $compiler /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 "/out:$starter" "/win32icon:$icon" @references $shared (Join-Path $project 'launcher\Program.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Kompilierung des Starters fehlgeschlagen.' }

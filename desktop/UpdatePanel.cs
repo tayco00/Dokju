@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,6 +11,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Threading;
 
@@ -55,14 +57,48 @@ namespace Dokju
             entry.Click += (sender, args) => Show();
             timer = new DispatcherTimer { Interval = TimeSpan.FromHours(6) };
             timer.Tick += async (sender, args) => await Check();
-            owner.Loaded += CheckAtStartup;
         }
 
-        private async void CheckAtStartup(object sender, RoutedEventArgs args)
+        internal Window CreateStartWindow()
         {
-            owner.Loaded -= CheckAtStartup;
-            timer.Start();
-            await Check();
+            Window start;
+            using (var layout = Assembly.GetExecutingAssembly().GetManifestResourceStream("Dokju.Startup.xaml"))
+                start = (Window)XamlReader.Load(layout);
+            start.Icon = owner.Icon;
+            ((Image)start.FindName("Logo")).Source = owner.Icon;
+            var review = (Button)start.FindName("Review");
+            var skip = (Button)start.FindName("Skip");
+            bool entered = false;
+            Action enter = () =>
+            {
+                if (entered) return;
+                entered = true;
+                owner.Show();
+                start.Close();
+                owner.Activate();
+            };
+            skip.Click += (sender, args) => enter();
+            review.Click += (sender, args) => { enter(); Show(); };
+            start.Closed += (sender, args) =>
+            {
+                if (!entered) { entered = true; Application.Current.Shutdown(); }
+            };
+            start.ContentRendered += async (sender, args) =>
+            {
+                skip.IsEnabled = true;
+                timer.Start();
+                await Check();
+                if (entered || disposed) return;
+                if (offer == null) { enter(); return; }
+                ((TextBlock)start.FindName("Heading")).Text = "Update verfügbar";
+                ((TextBlock)start.FindName("Description")).Text = offer.Caption + " ist bereit zur Installation.";
+                var progress = (ProgressBar)start.FindName("Progress");
+                progress.IsIndeterminate = false;
+                progress.Value = progress.Maximum;
+                ((TextBlock)start.FindName("Phase")).Visibility = Visibility.Collapsed;
+                review.Visibility = Visibility.Visible;
+            };
+            return start;
         }
 
         private Task Check()
@@ -291,7 +327,6 @@ namespace Dokju
         public void Dispose()
         {
             disposed = true;
-            owner.Loaded -= CheckAtStartup;
             timer.Stop();
             lifetime.Cancel();
             lifetime.Dispose();

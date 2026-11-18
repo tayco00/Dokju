@@ -103,6 +103,8 @@ export async function portal(request, response, store, origin, readBody) {
   }
   if (request.method !== 'GET') return invalid();
   if (status === 'expired' || (!withdrawal && status !== 'pending' && !store.isClaimant(invite, claim))) return invalid();
+  const receiptRequested = url.searchParams.get('receipt') === '1';
+  if (receiptRequested && (withdrawal || status !== 'accepted')) return invalid();
   if (!claim) {
     claim = randomBytes(24).toString('base64url');
     const secure = origin.startsWith('https:') ? '; Secure' : '';
@@ -121,8 +123,22 @@ export async function portal(request, response, store, origin, readBody) {
   }
   if (status === 'accepted') {
     const link = `${origin}/w/${store.token(invite, 'withdraw')}?lang=${language}`;
+    const mobile = origin.startsWith('https:');
+    const notice = item.notices[language];
+    const fields = [[copy.reference, item.reference], [copy.participant, invite.number], [copy.controller, notice.controller], [copy.contact, notice.contact]];
+    if (receiptRequested) {
+      const lines = ['Dokju', copy.accepted, item.title, ...fields.map(([label, value]) => `${label}: ${value}`),
+        `${copy.time}: ${formatTime(last.at, language)}`, '', copy.withdrawContact];
+      if (mobile) lines.push('', copy.open, link);
+      response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store',
+        'Content-Disposition': 'attachment; filename="Dokju.txt"', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' });
+      return response.end(lines.join('\r\n') + '\r\n');
+    }
     return sendHtml(response, 200, page(language, copy.accepted,
-      `<h1>${copy.accepted}</h1>${context}<p class="result">${copy.save}</p><label><span>${copy.open}</span><input type="text" readonly value="${escape(link)}"></label><a class="button" href="${escape(link)}">${copy.open}</a>${time}`));
+      `<h1>${copy.accepted}</h1>${context}${time}<p>${copy.withdrawContact}</p>
+      <dl>${fields.map(([label, value]) => `<dt>${label}</dt><dd>${escape(value)}</dd>`).join('')}</dl>
+      <a class="button" href="?lang=${language}&amp;receipt=1">${copy.receipt}</a>
+      <p class="result">${mobile ? copy.save : copy.localLink}</p><label><span>${copy.open}</span><input type="text" readonly value="${escape(link)}"></label><a class="button" href="${escape(link)}">${copy.open}</a>`));
   }
   const notice = item.notices[language];
   const info = [[copy.controller, notice.controller], [copy.provider, notice.provider], [copy.contact, notice.contact], [copy.proofDate, formatTime(item.proofUntil, language)]];

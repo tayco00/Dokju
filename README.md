@@ -6,7 +6,7 @@ Dokju ist eine Windows-Desktopanwendung für die Verwaltung digitaler Einwilligu
 
 1. [Dokju-Setup.exe](https://github.com/tayco00/Dokju/releases/latest/download/Dokju-Setup.exe) öffnen und den Installer abschließen. Dokju erscheint im Startmenü und unter **Einstellungen → Apps → Installierte Apps**. Die Installation gilt für das aktuelle Windows-Konto und bringt Node.js mit. `Dokju.zip` steht als portable Ausgabe zur Verfügung.
 2. **Neuer Vorgang** wählen. Beim ersten Vorgang die verantwortliche Stelle, den KI-Anbieter, den Datenschutzkontakt und die geltenden Aufbewahrungsfristen eintragen. Auf Wunsch übernimmt Dokju diese Angaben beim nächsten Vorgang. `Strg+N` öffnet das Formular direkt.
-3. **Im Browser öffnen** wählen. Auf der Einwilligungsseite **Ich stimme zu** wählen und den persönlichen Widerrufslink öffnen oder für später speichern. Der Desktop aktualisiert den Status alle zwei Sekunden. Bei mehreren Teilnehmenden wird der Vorgang nach Zustimmung aller Personen freigegeben.
+3. **Im Browser öffnen** wählen. Nach **Ich stimme zu** können Teilnehmende über **Bestätigung speichern** eine Textdatei mit Aktenzeichen, Teilnehmernummer und Kontakt mitnehmen. Bei eingerichtetem Mobilzugang enthält sie auch den persönlichen Widerrufslink. Am Arbeitsplatz funktioniert der lokale Link nur auf diesem PC. Der Desktop aktualisiert den Status alle zwei Sekunden. Bei mehreren Teilnehmenden wird der Vorgang nach Zustimmung aller Personen freigegeben.
 4. **Zustimmung widerrufen** wählen. Dokju setzt die Freigabe zurück und zeigt den Widerruf bei der betroffenen Person an.
 5. **Nachweis exportieren** wählen. Das PDF lässt sich in der Akte ablegen. Beim ZIP-Export bindet Dokju PDF und JSON-Nachweis aneinander. **Nachweis prüfen** erkennt Änderungen an beiden Dateien. Ältere Dokju-Exporte lassen sich weiterhin anhand des JSON-Nachweises prüfen.
 
@@ -26,7 +26,9 @@ Der Portaldienst läuft, solange Dokju geöffnet ist. Das aktuelle Release ist f
 
 ## GitHub-Updates
 
-**Updates** zeigt die installierte Buildnummer und das Ergebnis der Prüfung. Dokju beginnt die Prüfung beim Öffnen des Hauptfensters im Hintergrund, wiederholt sie alle sechs Stunden und auf Wunsch manuell. Nach Klick auf **Installieren und neu starten** lädt Dokju das Paket, prüft es und startet neu. Bei einem Startfehler öffnet der Starter die vorherige Version. Wenn die GitHub-API ausfällt, versucht Dokju, die Updateinformationen direkt von der aktuellen Veröffentlichung zu laden. Über **Downloadseite öffnen** lässt sich der Installer auch im Browser herunterladen. Vor der manuellen Installation Dokju schließen.
+Beim Öffnen erscheint **Nach Updates suchen**. **Ohne Update starten** öffnet den Arbeitsplatz sofort, während die Prüfung im Hintergrund weiterläuft. Ist die Version aktuell oder GitHub nicht erreichbar, öffnet Dokju den Arbeitsplatz automatisch. Findet Dokju ein Update, stehen **Update ansehen** und **Ohne Update starten** zur Wahl.
+
+Unter **Updates** stehen die installierte Buildnummer und das Ergebnis der Prüfung. Dokju prüft alle sechs Stunden und auf Wunsch manuell. Nach Klick auf **Installieren und neu starten** lädt Dokju das Paket, prüft es und startet neu. Bei einem Startfehler öffnet der Starter die vorherige Version. Wenn die GitHub-API ausfällt, versucht Dokju, die Updateinformationen direkt von der aktuellen Veröffentlichung zu laden. Über **Downloadseite öffnen** lässt sich der Installer auch im Browser herunterladen. Vor der manuellen Installation Dokju schließen.
 
 Der Workflow in `.github/workflows/windows-release.yml` prüft Pull Requests und Pushes auf `main`. Bei einem erfolgreichen Push veröffentlicht er den Installer und das Update-Paket für den letzten Commit des Pushes. Reihenfolge und Commit-ID stehen im Release-Tag und im Paket. Der Updater wählt aus den 30 zuletzt gelisteten Releases den höchsten passenden Build und prüft dessen SHA-256-Wert vor dem Entpacken.
 

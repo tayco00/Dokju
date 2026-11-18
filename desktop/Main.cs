@@ -26,8 +26,8 @@ namespace Dokju
         private static int Main(string[] arguments)
         {
             ServicePointManager.SecurityProtocol = SecurityProtocolType.SystemDefault;
-            bool liveSmoke = arguments.Length == 2 && arguments[0] == "--smoke-live";
-            bool smoke = liveSmoke || (arguments.Length == 2 && arguments[0] == "--smoke");
+            var scenario = arguments.Length == 2 && new[] { "--smoke", "--smoke-live", "--smoke-current", "--smoke-offline", "--smoke-skip" }.Contains(arguments[0]) ? arguments[0] : null;
+            bool smoke = scenario != null;
             Guid probeId;
             bool probe = arguments.Length == 2 && arguments[0] == "--startup-probe" && Guid.TryParseExact(arguments[1], "N", out probeId);
             string directory = smoke ? Path.GetFullPath(arguments[1]) : Installation.DataDirectory;
@@ -48,14 +48,20 @@ namespace Dokju
                     }
                     using (guard)
                     {
-                        var app = new Application();
-                        using (var workspace = new Workspace(directory, smoke, liveSmoke))
+                        var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
+                        using (var workspace = new Workspace(directory, scenario))
                         {
-                            if (smoke) workspace.Smoke(liveSmoke);
-                            if (probe) workspace.Window.ContentRendered += (sender, args) =>
-                                Installation.WriteAtomic(Path.Combine(Installation.Root(directory), "probes", arguments[1]), new byte[] { 1 });
-                            if (arguments.Length == 1 && arguments[0] == "--update-fallback") workspace.ShowUpdateFallback();
-                            return app.Run(workspace.Window);
+                            app.MainWindow = workspace.Window;
+                            var start = workspace.CreateStartWindow();
+                            start.ContentRendered += (sender, args) =>
+                            {
+                                workspace.OpenWorkspace();
+                                if (probe) Installation.WriteAtomic(Path.Combine(Installation.Root(directory), "probes", arguments[1]), new byte[] { 1 });
+                                if (arguments.Length == 1 && arguments[0] == "--update-fallback") workspace.ShowUpdateFallback();
+                            };
+                            if (smoke) workspace.Smoke(scenario, start);
+                            start.Show();
+                            return app.Run();
                         }
                     }
                 }
@@ -94,7 +100,7 @@ namespace Dokju
         private string connectionNotice;
         public readonly Window Window;
 
-        public Workspace(string directory, bool smoke, bool liveSmoke)
+        public Workspace(string directory, string scenario)
         {
             this.directory = directory;
             Directory.CreateDirectory(directory);
@@ -129,7 +135,15 @@ namespace Dokju
             Control<ComboBox>("CaseFilter").SelectionChanged += (sender, args) => Run(Filter);
             Control<ListBox>("CaseList").SelectionChanged += (sender, args) => { if (!updating) Run(ShowCase); };
             Control<ComboBox>("PersonList").SelectionChanged += (sender, args) => { if (!updating) Run(ShowPerson); };
-            connection = smoke ? new Connection { port = 0, publicOrigin = "https://einwilligung.example" } : LoadConnection();
+            connection = scenario != null ? new Connection { port = 0, publicOrigin = "https://einwilligung.example" } : LoadConnection();
+            timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            timer.Tick += (sender, args) => PollStatus();
+            var updateClient = scenario != null && scenario != "--smoke-live" ? new GitHubUpdates(new System.Net.Http.HttpClient(new StartupUpdateFixture(scenario))) : null;
+            updates = new UpdatePanel(Window, Button("UpdateButton"), Label("UpdateStatus"), directory, updateClient);
+        }
+
+        internal void OpenWorkspace()
+        {
             try { Start(connection); }
             catch (BackendStartException error)
             {
@@ -143,11 +157,7 @@ namespace Dokju
             }
             Refresh(null, true);
             Message(connectionNotice ?? "Bereit.");
-            timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-            timer.Tick += (sender, args) => PollStatus();
             timer.Start();
-            var updateClient = smoke && !liveSmoke ? new GitHubUpdates(new System.Net.Http.HttpClient(new StartupUpdateFixture())) : null;
-            updates = new UpdatePanel(Window, Button("UpdateButton"), Label("UpdateStatus"), directory, updateClient);
         }
 
         private void PollStatus()
@@ -650,8 +660,39 @@ namespace Dokju
             }
         }
 
-        public void Smoke(bool liveUpdate)
+        internal Window CreateStartWindow() { return updates.CreateStartWindow(); }
+
+        public void Smoke(string scenario, Window start)
         {
+            start.ContentRendered += async (sender, args) =>
+            {
+                try
+                {
+                    var skip = (Button)start.FindName("Skip");
+                    var description = (TextBlock)start.FindName("Description");
+                    if (Window.IsVisible || !start.IsVisible || !skip.IsEnabled || updates.StartupCheck == null ||
+                        description.Text != "Prüfe auf vorhandene Updates ..." || !((ProgressBar)start.FindName("Progress")).IsIndeterminate)
+                        throw new IOException("Das Update-Startfenster wurde nicht korrekt angezeigt.");
+                    Capture(start, Path.Combine(directory, "start.png"));
+                    if (scenario == "--smoke-live" || scenario == "--smoke-skip")
+                    {
+                        skip.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                        if (!Window.IsVisible || start.IsVisible) throw new IOException("Der Sofortstart öffnet den Arbeitsplatz nicht.");
+                    }
+                    if (scenario == "--smoke")
+                    {
+                        await updates.StartupCheck;
+                        await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                        if (!((Button)start.FindName("Review")).IsVisible) throw new IOException("Das gefundene Update wird im Startfenster nicht angeboten.");
+                        skip.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                    }
+                }
+                catch (Exception error)
+                {
+                    File.WriteAllText(Path.Combine(directory, "smoke-error.txt"), error.ToString());
+                    Application.Current.Shutdown(1);
+                }
+            };
             Window.ContentRendered += (sender, args) => Window.Dispatcher.BeginInvoke(new Action(async () =>
             {
                 try
@@ -659,12 +700,15 @@ namespace Dokju
                     var check = updates.StartupCheck;
                     if (check == null) throw new IOException("Die Updateprüfung wurde beim Öffnen nicht ausgelöst.");
                     var updateStatus = Label("UpdateStatus");
-                    if (!updateStatus.IsVisible || updateStatus.Text != "Prüfe auf vorhandene Updates ...")
-                        throw new IOException("Die laufende Updateprüfung ist beim Öffnen nicht sichtbar.");
                     await check;
-                    if (!updates.LastCheckSucceeded) throw new IOException(updates.CheckMessage);
+                    if (updates.LastCheckSucceeded == (scenario == "--smoke-offline")) throw new IOException(updates.CheckMessage);
+                    if (start.IsVisible) throw new IOException("Das Startfenster ist nach dem Einstieg noch geöffnet.");
                     if (updateStatus.IsVisible) throw new IOException("Die Updateprüfung wird weiterhin als laufend angezeigt.");
-                    if (!liveUpdate && !Equals(Button("UpdateButton").Content, "Update verfügbar")) throw new IOException("Das Update wurde beim Öffnen nicht angezeigt.");
+                    if (scenario != "--smoke-live")
+                    {
+                        var expected = scenario == "--smoke" || scenario == "--smoke-skip" ? "Update verfügbar" : "Updates";
+                        if (!Equals(Button("UpdateButton").Content, expected)) throw new IOException("Der Updatestatus stimmt nicht mit der Prüfung überein.");
+                    }
                     var item = backend.Post<CaseRow>("/cases", new
                     {
                         title = "Beratungsgespräch", reference = "AZ-42", count = 1, controller = "Verwaltung",
@@ -713,9 +757,17 @@ namespace Dokju
 
         private sealed class StartupUpdateFixture : System.Net.Http.HttpMessageHandler
         {
+            private readonly string scenario;
+            internal StartupUpdateFixture(string scenario) { this.scenario = scenario; }
+
             protected override System.Threading.Tasks.Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage request, CancellationToken cancellation)
             {
                 cancellation.ThrowIfCancellationRequested();
+                if (scenario == "--smoke-offline" || scenario == "--smoke-current")
+                {
+                    var code = scenario == "--smoke-offline" ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.OK;
+                    return System.Threading.Tasks.Task.FromResult(new System.Net.Http.HttpResponseMessage(code) { Content = new System.Net.Http.StringContent("[]") });
+                }
                 var segments = request.RequestUri.Segments;
                 var repository = segments[2] + segments[3].TrimEnd('/');
                 var commit = new string('a', 40);

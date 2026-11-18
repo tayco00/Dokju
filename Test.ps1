@@ -40,18 +40,20 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Die Updatetests sind fehlgeschlagen.' }
     }
 
-    $desktopData = Join-Path $scratch 'desktop'
-    [void](New-Item -ItemType Directory -Path $desktopData)
-    $argument = if ($LiveRepository) { '--smoke-live' } else { '--smoke' }
-    $application = Start-Process -FilePath $desktop -ArgumentList ($argument + ' "' + $desktopData + '"') -WindowStyle Hidden -PassThru
-    if (!$application.WaitForExit(35000)) {
-        Stop-Process -Id $application.Id
-        throw 'Die Desktopoberfläche wurde nicht rechtzeitig geprüft.'
-    }
-    $failure = Join-Path $desktopData 'smoke-error.txt'
-    if (Test-Path -LiteralPath $failure) { throw (Get-Content -LiteralPath $failure -Raw) }
-    if ($application.ExitCode -ne 0 -or !(Test-Path -LiteralPath (Join-Path $desktopData 'smoke-ok.txt'))) {
-        throw 'Die Desktop-Abnahme ist fehlgeschlagen.'
+    $scenarios = if ($LiveRepository) { '--smoke-live' } else { '--smoke', '--smoke-current', '--smoke-offline', '--smoke-skip' }
+    foreach ($scenario in $scenarios) {
+        $desktopData = Join-Path $scratch ('desktop' + $scenario.Substring(7))
+        [void](New-Item -ItemType Directory -Path $desktopData)
+        $application = Start-Process -FilePath $desktop -ArgumentList ($scenario + ' "' + $desktopData + '"') -WindowStyle Hidden -PassThru
+        if (!$application.WaitForExit(35000)) {
+            Stop-Process -Id $application.Id
+            throw "Die Desktopoberfläche wurde nicht rechtzeitig geprüft ($scenario)."
+        }
+        $failure = Join-Path $desktopData 'smoke-error.txt'
+        if (Test-Path -LiteralPath $failure) { throw (Get-Content -LiteralPath $failure -Raw) }
+        if ($application.ExitCode -ne 0 -or !(Test-Path -LiteralPath (Join-Path $desktopData 'smoke-ok.txt'))) {
+            throw "Die Desktop-Abnahme ist fehlgeschlagen ($scenario)."
+        }
     }
     Write-Output 'Desktop: Updateprüfung beim Start, QR-Code, Softwareupdates-Dialog und Nachweisexport bestanden.'
 } finally {

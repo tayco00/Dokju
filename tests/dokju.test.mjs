@@ -104,6 +104,8 @@ test('Desktop and citizen flow survives a restart, preserves exact notices and r
   assert.ok(first.qr.every(row => /^[01]{37}$/.test(row)));
   const english = await openForm(app, first.link + '?lang=en');
   const simple = await openForm(app, second.link + '?lang=einfach');
+  const download = (url, cookie) => app.citizen(url + '&receipt=1', { headers: { Cookie: cookie } });
+  assert.equal((await download(english.url, english.cookie)).status, 404);
   assert.match(english.raw, /I consent/);
   assert.match(english.raw, /<img src="data:image\/png;base64,iVBORw0KGgo/);
   assert.match(english.raw, /Özer &lt;Test&gt;/);
@@ -122,6 +124,21 @@ test('Desktop and citizen flow survives a restart, preserves exact notices and r
   assert.equal((await submit(app, simple, 'accepted')).status, 303);
   assert.equal((await app.request(base + '/status')).value.ready, true);
   const receipt = await (await app.citizen(english.url, { headers: { Cookie: english.cookie } })).text();
+  assert.match(receipt, /only works on this computer/);
+  assert.match(receipt, /href="\?lang=en&amp;receipt=1"/);
+  assert.equal((await download(english.url, simple.cookie)).status, 404);
+  const attachment = await download(english.url, english.cookie);
+  assert.equal(attachment.status, 200);
+  assert.equal(attachment.headers.get('cache-control'), 'no-store');
+  assert.equal(attachment.headers.get('content-disposition'), 'attachment; filename="Dokju.txt"');
+  assert.match(attachment.headers.get('content-type'), /text\/plain; charset=utf-8/);
+  const confirmation = await attachment.text();
+  for (const value of [fixture.title, fixture.reference, fixture.contact, 'Participant: 1', 'Your consent was recorded.'])
+    assert.ok(confirmation.includes(value));
+  assert.doesNotMatch(confirmation, /127\.0\.0\.1|\/w\/|Participant: 2/);
+  const simpleText = await (await download(simple.url, simple.cookie)).text();
+  assert.match(simpleText, /Person: 2/);
+  assert.match(simpleText, /Ich nehme mein Ja zurück/);
   const withdrawal = /href="([^"]+\/w\/[^"]+)"/.exec(receipt)[1];
   assert.notEqual(withdrawal, first.link);
   assert.equal((await app.request(base + '/renew', { person: 1 })).status, 409);
@@ -133,6 +150,7 @@ test('Desktop and citizen flow survives a restart, preserves exact notices and r
   const withdraw = await openForm(app, withdrawal);
   assert.match(withdraw.raw, /Withdraw my consent/);
   assert.equal((await submit(app, withdraw, 'withdrawn')).status, 303);
+  assert.equal((await download(english.url, english.cookie)).status, 404);
   assert.equal((await submit(app, withdraw, 'withdrawn')).status, 303);
   const status = (await app.request(base + '/status')).value;
   assert.equal(status.ready, false);
@@ -185,6 +203,12 @@ test('Mobile portal links use the configured HTTPS origin and secure cookies', a
   const recovered = await app.request(base + '/withdrawal-link?person=1');
   assert.equal(recovered.status, 200);
   assert.ok(receipt.includes(recovered.value.link));
+  const download = await app.citizen(link + '?receipt=1', { headers: { Cookie: form.cookie } });
+  const text = await download.text();
+  assert.equal(download.status, 200);
+  assert.ok(text.includes(recovered.value.link));
+  assert.ok(text.includes('Aktenzeichen: ' + fixture.reference));
+  assert.equal((await app.citizen(recovered.value.link + '?receipt=1')).status, 404);
 });
 
 test('Editing replaces unclaimed links and a workplace withdrawal preserves the original decision', async t => {
