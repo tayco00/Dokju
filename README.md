@@ -12,7 +12,7 @@ Dokju ist eine Windows-Desktopanwendung für die Verwaltung digitaler Einwilligu
 
 Vor der ersten Entscheidung lässt sich ein Vorgang bearbeiten. Geänderte Angaben erzeugen neue Einladungen, damit frühere Links keine Entscheidungen auf Grundlage veralteter Informationen zulassen. Eine offene oder abgelaufene Einladung kann einzeln erneuert werden. Hat eine teilnehmende Person anderweitig widerrufen, kann die zuständige Stelle dies bei der ausgewählten Person erfassen. Im Nachweis steht dann **Am Arbeitsplatz erfasst**. Bei eingerichtetem Mobilzugang kann die Stelle den persönlichen Widerrufslink auch erneut bereitstellen.
 
-Ein Wechsel von der portablen Ausgabe zur Installation im selben Windows-Konto übernimmt die vorhandenen Vorgänge. Die Deinstallation entfernt Programm, Verknüpfungen und heruntergeladene Updates. Vorgänge und verschlüsselter Schlüssel bleiben für eine spätere Installation im Windows-Profil erhalten.
+Ein Wechsel von der portablen Ausgabe zur Installation im selben Windows-Konto übernimmt die vorhandenen Vorgänge. Unter **Windows-Einstellungen → Apps → Installierte Apps → Dokju → Deinstallieren** entscheiden Sie, ob Sie Ihre lokalen Daten behalten möchten. Bei der Frage nach der Datenlöschung ist **Nein** vorausgewählt. **Ja** löscht den gesamten Dokju-Datenordner dieses Windows-Kontos einschließlich Vorgängen, Einstellungen und Prüfschlüssel. Ohne diesen Schlüssel können früher exportierte Nachweise an diesem Arbeitsplatz nicht mehr bestätigt werden. Außerhalb des Datenordners gespeicherte Exporte bleiben erhalten. Wenn eine ältere Installation diese Frage noch nicht anzeigt, führen Sie den aktuellen Windows-Installer einmal über die bestehende Installation aus.
 
 ## Einwilligungsportal einrichten
 
